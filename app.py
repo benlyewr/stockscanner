@@ -52,11 +52,8 @@ def color_score(val):
     else:
         return "background-color: #3d0000; color: white"
 
-def color_price_vs_ma(val):
-    return "color: #00ff00" if val else "color: #ff4444"
-
 st.subheader("📊 Scores")
-styled = df_results.style.applymap(color_score, subset=["Score"])
+styled = df_results.style.map(color_score, subset=["Score"])
 st.dataframe(styled, use_container_width=True)
 
 st.subheader("📈 Price Charts")
