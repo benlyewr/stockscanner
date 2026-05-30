@@ -33,14 +33,7 @@ for i, ticker in enumerate(tickers):
         ma150 = round(float(close.rolling(150).mean().iloc[-1]), 2)
         ma200 = round(float(close.rolling(200).mean().iloc[-1]), 2)
         score = sum([price > ma50, price > ma150, price > ma200])
-        results.append({
-            "Ticker": ticker,
-            "Price": price,
-            "50MA": ma50,
-            "150MA": ma150,
-            "200MA": ma200,
-            "Score": score
-        })
+        results.append({"Ticker": ticker, "Price": price, "50MA": ma50, "150MA": ma150, "200MA": ma200, "Score": score})
         stock_data[ticker] = df
     except Exception as e:
         st.warning(f"Skipped {ticker}: {e}")
@@ -48,11 +41,16 @@ for i, ticker in enumerate(tickers):
 
 status.text("Done!")
 df_results = pd.DataFrame(results).sort_values("Score", ascending=False)
-
 st.subheader("📊 Scores")
 st.dataframe(df_results, use_container_width=True)
-
 st.subheader("📈 Price Charts")
-selected = st.selectbox("Select a stock to view chart", df_results["Ticker"].tolist())
-
-if selected and selected in stock_data:
+selected = st.selectbox("Select a stock", df_results["Ticker"].tolist())
+df = stock_data[selected]
+close = df["Close"].squeeze()
+fig = go.Figure()
+fig.add_trace(go.Scatter(x=df.index, y=close, name="Price", line=dict(color="white", width=2)))
+fig.add_trace(go.Scatter(x=df.index, y=close.rolling(50).mean(), name="50MA", line=dict(color="blue")))
+fig.add_trace(go.Scatter(x=df.index, y=close.rolling(150).mean(), name="150MA", line=dict(color="orange")))
+fig.add_trace(go.Scatter(x=df.index, y=close.rolling(200).mean(), name="200MA", line=dict(color="red")))
+fig.update_layout(template="plotly_dark", title=f"{selected} - 1 Year Chart", height=500)
+st.plotly_chart(fig, use_container_width=True)
