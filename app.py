@@ -12,8 +12,11 @@ st.set_page_config(page_title="Stock Scanner V2", layout="wide")
 
 st.markdown("""
 <style>
-[data-testid="stMetricValue"] { font-size: 1.1rem !important; }
-[data-testid="stMetricLabel"] { font-size: 0.7rem !important; }
+[data-testid="stMetricValue"] { font-size: 1rem !important; }
+[data-testid="stMetricLabel"] { font-size: 0.65rem !important; color: #aaa; }
+[data-testid="stMetric"] { background: #1a1a2e; border-radius: 8px; padding: 8px 12px; border: 1px solid #2a2a3e; }
+div[data-testid="stHorizontalBlock"] { gap: 8px; }
+.big-metric { font-size: 1.4rem; font-weight: bold; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -34,9 +37,9 @@ tickers = [
 ]
 
 def get_label(score):
-    if score >= 85: return "🟢 Strong Candidate"
+    if score >= 85: return "🟢 Strong"
     elif score >= 70: return "🟩 Watchlist"
-    elif score >= 55: return "🟨 Early Setup"
+    elif score >= 55: return "🟨 Early"
     else: return "🔴 Ignore"
 
 @st.cache_data(ttl=3600)
@@ -118,7 +121,12 @@ def get_fundamentals(ticker):
             "forward_pe": info.get("forwardPE"),
             "profit_margin": info.get("profitMargins"),
             "eps_forward": info.get("forwardEps"),
-            "eps_trailing": info.get("trailingEps")
+            "eps_trailing": info.get("trailingEps"),
+            "market_cap": info.get("marketCap"),
+            "52w_high": info.get("fiftyTwoWeekHigh"),
+            "52w_low": info.get("fiftyTwoWeekLow"),
+            "avg_volume": info.get("averageVolume"),
+            "shares_outstanding": info.get("sharesOutstanding"),
         }
     except:
         return {}
@@ -159,8 +167,7 @@ def detect_123_reversal(close):
             p3_idx, p3 = lows[-1]
             if p3 > p1:
                 p2 = max(prices[p1_idx:p3_idx])
-                current = prices[-1]
-                if current > p2:
+                if prices[-1] > p2:
                     return True
         return False
     except:
@@ -244,7 +251,6 @@ with st.spinner("Loading all stocks..."):
                 "Score": score,
                 "Label": get_label(score),
                 "50MA": f"${ma50:.2f}",
-                "150MA": f"${ma150:.2f}",
                 "200MA": f"${ma200:.2f}",
                 "52W High": f"${high52:.2f}",
                 "52W Low": f"${low52:.2f}",
@@ -252,11 +258,11 @@ with st.spinner("Loading all stocks..."):
                 "vs 200MA": f"{pct_from_200}%",
                 "vs 52W High": f"{pct_from_high}%",
                 "RS vs SPY": f"{rs}%",
-                "123 Reversal": "✅" if reversal_123 else "❌",
-                "Avg Vol": f"{int(avg_vol):,}",
+                "123 Rev": "✅" if reversal_123 else "❌",
                 "_price_raw": price,
                 "_ma50_slope": ma50_slope,
-                "_ma200_slope": ma200_slope
+                "_ma200_slope": ma200_slope,
+                "_fund": fund
             })
             stock_data[ticker] = df
         except Exception as e:
@@ -278,47 +284,44 @@ with tab1:
         elif val >= 55: return "background-color: #5c5c1a; color: white"
         else: return "background-color: #3d0000; color: white"
 
-    display_cols = ["Ticker","Price","Score","Label","50MA","150MA","200MA","vs 50MA","vs 200MA","vs 52W High","RS vs SPY","123 Reversal"]
+    display_cols = ["Ticker","Price","Score","Label","50MA","200MA","vs 50MA","vs 200MA","vs 52W High","RS vs SPY","123 Rev"]
     styled = df_results[display_cols].style.map(color_score, subset=["Score"])
     st.dataframe(styled, use_container_width=True, height=500)
 
     c1, c2, c3, c4 = st.columns(4)
-    strong = df_results[df_results["Score"] >= 85]
-    watch = df_results[(df_results["Score"] >= 70) & (df_results["Score"] < 85)]
-    early = df_results[(df_results["Score"] >= 55) & (df_results["Score"] < 70)]
-    ignore = df_results[df_results["Score"] < 55]
-    c1.metric("🟢 Strong Candidates", len(strong))
-    c2.metric("🟩 Watchlist", len(watch))
-    c3.metric("🟨 Early Setup", len(early))
-    c4.metric("🔴 Ignore", len(ignore))
+    c1.metric("🟢 Strong", len(df_results[df_results["Score"] >= 85]))
+    c2.metric("🟩 Watchlist", len(df_results[(df_results["Score"] >= 70) & (df_results["Score"] < 85)]))
+    c3.metric("🟨 Early", len(df_results[(df_results["Score"] >= 55) & (df_results["Score"] < 70)]))
+    c4.metric("🔴 Ignore", len(df_results[df_results["Score"] < 55]))
 
 with tab2:
     selected = st.selectbox("Select stock", df_results["Ticker"].tolist())
     row = df_results[df_results["Ticker"] == selected].iloc[0]
-    fund = get_fundamentals(selected)
+    fund = row["_fund"]
 
-    c1, c2, c3, c4, c5, c6 = st.columns(6)
+    st.markdown(f"### {selected} — {row['Label']}")
+
+    c1, c2, c3, c4, c5, c6, c7, c8 = st.columns(8)
     c1.metric("Price", row["Price"])
     c2.metric("Score", f"{int(row['Score'])}/100")
-    c3.metric("Label", row["Label"])
-    c4.metric("52W High", row["52W High"])
+    c3.metric("52W High", row["52W High"])
+    c4.metric("52W Low", row["52W Low"])
     c5.metric("vs 52W High", row["vs 52W High"])
     c6.metric("RS vs SPY", row["RS vs SPY"])
+    c7.metric("vs 50MA", row["vs 50MA"])
+    c8.metric("vs 200MA", row["vs 200MA"])
 
     if fund:
-        f1, f2, f3, f4, f5 = st.columns(5)
-        f1.metric("🎯 Target", f"${fund['target']:.2f}" if fund.get('target') else "N/A")
-        f2.metric("📈 Upside", f"{fund['upside']}%" if fund.get('upside') else "N/A")
-        f3.metric("💰 Rev Growth", f"{round(fund['rev_growth']*100,1)}%" if fund.get('rev_growth') else "N/A")
-        f4.metric("📉 Fwd PE", f"{round(fund['forward_pe'],1)}" if fund.get('forward_pe') else "N/A")
-        f5.metric("💵 Margin", f"{round(fund['profit_margin']*100,1)}%" if fund.get('profit_margin') else "N/A")
-
-        a1, a2, a3, a4, a5 = st.columns(5)
-        a1.metric("💚 Strong Buy", fund.get('strong_buy', 0))
-        a2.metric("🟢 Buy", fund.get('buy', 0))
-        a3.metric("🟡 Hold", fund.get('hold', 0))
-        a4.metric("🔴 Sell", fund.get('sell', 0))
-        a5.metric("❌ Strong Sell", fund.get('strong_sell', 0))
+        st.markdown("---")
+        d1, d2, d3, d4, d5, d6, d7, d8 = st.columns(8)
+        d1.metric("🎯 Target", f"${fund['target']:.2f}" if fund.get('target') else "N/A")
+        d2.metric("📈 Upside", f"{fund['upside']}%" if fund.get('upside') else "N/A")
+        d3.metric("💰 Rev Growth", f"{round(fund['rev_growth']*100,1)}%" if fund.get('rev_growth') else "N/A")
+        d4.metric("📉 Fwd PE", f"{round(fund['forward_pe'],1)}" if fund.get('forward_pe') else "N/A")
+        d5.metric("💵 Margin", f"{round(fund['profit_margin']*100,1)}%" if fund.get('profit_margin') else "N/A")
+        d6.metric("💚 Str Buy", fund.get('strong_buy', 0))
+        d7.metric("🟢 Buy", fund.get('buy', 0))
+        d8.metric("🟡 Hold", fund.get('hold', 0))
 
     df = stock_data[selected]
     close = df["Close"].squeeze()
@@ -337,31 +340,33 @@ with tab2:
     close_plot = df_plot["Close"].squeeze()
     vol_plot = df_plot["Volume"].squeeze()
 
-    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.75, 0.25], vertical_spacing=0.02)
-    fig.add_trace(go.Candlestick(x=df_plot.index, open=df_plot["Open"].squeeze(), high=df_plot["High"].squeeze(), low=df_plot["Low"].squeeze(), close=close_plot, name="Price", increasing_line_color="lime", decreasing_line_color="red"), row=1, col=1)
+    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.78, 0.22], vertical_spacing=0.01)
+    fig.add_trace(go.Scatter(x=df_plot.index, y=close_plot, name="Price", line=dict(color="white", width=2)), row=1, col=1)
     fig.add_trace(go.Scatter(x=df_plot.index, y=close_plot.rolling(50).mean(), name="50MA", line=dict(color="dodgerblue", width=1.5)), row=1, col=1)
-    fig.add_trace(go.Scatter(x=df_plot.index, y=close_plot.rolling(150).mean(), name="150MA", line=dict(color="orange", width=1.5)), row=1, col=1)
     fig.add_trace(go.Scatter(x=df_plot.index, y=close_plot.rolling(200).mean(), name="200MA", line=dict(color="red", width=1.5)), row=1, col=1)
     colors = ["lime" if i == 0 or float(vol_plot.iloc[i]) >= float(vol_plot.iloc[i-1]) else "red" for i in range(len(vol_plot))]
-    fig.add_trace(go.Bar(x=df_plot.index, y=vol_plot, name="Volume", marker_color=colors, opacity=0.5), row=2, col=1)
+    fig.add_trace(go.Bar(x=df_plot.index, y=vol_plot, name="Volume", marker_color=colors, opacity=0.4), row=2, col=1)
     for s in supports:
         fig.add_hline(y=s, line_dash="dash", line_color="lime", opacity=0.4, annotation_text=f"S ${s}", row=1, col=1)
     for r in resistances:
         fig.add_hline(y=r, line_dash="dash", line_color="tomato", opacity=0.4, annotation_text=f"R ${r}", row=1, col=1)
     if fund and fund.get('target'):
-        fig.add_hline(y=fund['target'], line_dash="dot", line_color="gold", opacity=0.8, annotation_text=f"🎯 ${fund['target']:.2f}", row=1, col=1)
+        fig.add_hline(y=fund['target'], line_dash="dot", line_color="gold", opacity=0.9, annotation_text=f"🎯 ${fund['target']:.2f}", row=1, col=1)
     fig.update_layout(
         template="plotly_dark",
-        title=f"{selected} — {timeframe}",
+        title=dict(text=f"{selected} — {timeframe}", font=dict(size=16)),
         xaxis_rangeslider_visible=False,
-        height=600,
-        margin=dict(l=0, r=0, t=40, b=0),
+        height=580,
+        margin=dict(l=10, r=10, t=40, b=10),
+        legend=dict(orientation="h", y=1.05, x=0),
         dragmode="drawline",
         newshape=dict(line_color="yellow"),
-        modebar_add=["drawline", "drawopenpath", "drawrect", "eraseshape"]
+        modebar_add=["drawline", "drawopenpath", "drawrect", "eraseshape"],
+        plot_bgcolor="#0e0e1a",
+        paper_bgcolor="#0e0e1a"
     )
-    fig.update_xaxes(showgrid=False)
-    fig.update_yaxes(showgrid=True, gridcolor="#2a2a2a")
+    fig.update_xaxes(showgrid=False, zeroline=False)
+    fig.update_yaxes(showgrid=True, gridcolor="#1e1e2e", zeroline=False)
     st.plotly_chart(fig, use_container_width=True)
 
     sr1, sr2 = st.columns(2)
@@ -383,7 +388,7 @@ with tab3:
                 "EPS": round(item.get("eps", 0), 2),
                 "Net Income ($M)": round(item.get("netIncome", 0)/1e6, 1),
                 "Gross Profit ($M)": round(item.get("grossProfit", 0)/1e6, 1),
-                "Operating Income ($M)": round(item.get("operatingIncome", 0)/1e6, 1),
+                "Op Income ($M)": round(item.get("operatingIncome", 0)/1e6, 1),
             })
         df_rev = pd.DataFrame(rev_data)
         st.markdown("#### 📊 Actual Financials (Last 5 Years)")
@@ -393,37 +398,31 @@ with tab3:
         fig_rev.add_trace(go.Scatter(x=df_rev["Year"], y=df_rev["EPS"], name="EPS", yaxis="y2", line=dict(color="gold", width=2)))
         fig_rev.update_layout(template="plotly_dark", title="Revenue & EPS",
             yaxis=dict(title="Revenue ($M)"),
-            yaxis2=dict(title="EPS", overlaying="y", side="right"), height=350)
+            yaxis2=dict(title="EPS", overlaying="y", side="right"), height=350,
+            paper_bgcolor="#0e0e1a", plot_bgcolor="#0e0e1a")
         st.plotly_chart(fig_rev, use_container_width=True)
     else:
         st.info("Add FMP_API_KEY to Streamlit secrets to unlock full Revenue & EPS data.")
         fund2 = get_fundamentals(selected_rev)
         if fund2:
-            st.markdown("#### Available from yfinance:")
-            col1, col2, col3 = st.columns(3)
-            col1.metric("Rev Growth (YoY)", f"{round(fund2['rev_growth']*100,1)}%" if fund2.get('rev_growth') else "N/A")
+            col1, col2, col3, col4 = st.columns(4)
+            col1.metric("Rev Growth YoY", f"{round(fund2['rev_growth']*100,1)}%" if fund2.get('rev_growth') else "N/A")
             col2.metric("Trailing EPS", f"${fund2.get('eps_trailing', 'N/A')}")
             col3.metric("Forward EPS", f"${fund2.get('eps_forward', 'N/A')}")
+            col4.metric("Profit Margin", f"{round(fund2['profit_margin']*100,1)}%" if fund2.get('profit_margin') else "N/A")
 
     if estimates and len(estimates) > 0:
-        est_data = []
-        for item in estimates[:3]:
-            est_data.append({
-                "Year": item.get("date", "")[:4],
-                "Est Revenue ($M)": round(item.get("estimatedRevenueAvg", 0)/1e6, 1),
-                "Est EPS": round(item.get("estimatedEpsAvg", 0), 2),
-            })
-        df_est = pd.DataFrame(est_data)
-        st.markdown("#### 🔮 Estimated Financials (Next 3 Years)")
-        st.dataframe(df_est, use_container_width=True)
+        est_data = [{"Year": item.get("date","")[:4], "Est Rev ($M)": round(item.get("estimatedRevenueAvg",0)/1e6,1), "Est EPS": round(item.get("estimatedEpsAvg",0),2)} for item in estimates[:3]]
+        st.markdown("#### 🔮 Estimates (Next 3 Years)")
+        st.dataframe(pd.DataFrame(est_data), use_container_width=True)
 
 with tab4:
     macro = get_macro()
     st.markdown("### 🌍 Macro Dashboard")
     if fg_score:
         fg_color = "🟢" if fg_score >= 60 else "🟡" if fg_score >= 40 else "🔴"
-        st.metric(f"{fg_color} Fear & Greed Index", f"{fg_score} — {fg_label}")
-    st.divider()
+        st.metric(f"{fg_color} Fear & Greed", f"{fg_score} — {fg_label}")
+    st.markdown("---")
     macro_items = list(macro.items())
     for j in range(0, len(macro_items), 4):
         cols = st.columns(4)
@@ -443,11 +442,9 @@ with tab5:
         st.info("No news found.")
     st.divider()
     st.markdown("#### 🌐 Global Macro News")
-    for source, url in [("Reuters", "https://feeds.reuters.com/reuters/businessNews")]:
-        try:
-            feed = feedparser.parse(url)
-            st.markdown(f"**{source}**")
-            for entry in feed.entries[:4]:
-                st.markdown(f"• [{entry.title}]({entry.link})")
-        except:
-            pass
+    try:
+        feed = feedparser.parse("https://feeds.reuters.com/reuters/businessNews")
+        for entry in feed.entries[:5]:
+            st.markdown(f"• [{entry.title}]({entry.link})")
+    except:
+        pass
