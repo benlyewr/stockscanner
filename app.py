@@ -4,13 +4,13 @@ import pandas as pd
 import plotly.graph_objects as go
 
 st.set_page_config(page_title="Stock Scanner", layout="wide")
-st.title("📈 SaaS Stock Scanner")
+st.title("📈 Stock Scanner")
 
 tickers = [
-    "CRM", "NOW", "SNOW", "DDOG", "NET",
-    "ZS", "CRWD", "MDB", "GTLB", "BILL",
-    "HUBS", "TEAM", "OKTA", "ZI", "ESTC",
-    "CFLT", "TTD", "APPF", "PCTY", "PAYC"
+    "MSFT", "AAPL", "NVDA", "AVGO", "WDC",
+    "GOOG", "META", "AMZN", "NOW", "GLW",
+    "MCD", "QUBT", "UEC", "AGYS", "IBM",
+    "UBER", "NFLX", "ORCL", "BABA", "CRWV"
 ]
 
 @st.cache_data(ttl=3600)
@@ -28,12 +28,32 @@ for i, ticker in enumerate(tickers):
         status.text(f"Loading {ticker}...")
         df = get_stock_data(ticker)
         close = df["Close"].squeeze()
+        vol = df["Volume"].squeeze()
         price = round(float(close.iloc[-1]), 2)
         ma50 = round(float(close.rolling(50).mean().iloc[-1]), 2)
         ma150 = round(float(close.rolling(150).mean().iloc[-1]), 2)
         ma200 = round(float(close.rolling(200).mean().iloc[-1]), 2)
-        score = sum([price > ma50, price > ma150, price > ma200])
-        results.append({"Ticker": ticker, "Price": price, "50MA": ma50, "150MA": ma150, "200MA": ma200, "Score": score})
+        high52 = round(float(close.max()), 2)
+        low52 = round(float(close.min()), 2)
+        pct_from_50 = round((price - ma50) / ma50 * 100, 1)
+        pct_from_200 = round((price - ma200) / ma200 * 100, 1)
+        avg_vol = round(float(vol.rolling(50).mean().iloc[-1]), 0)
+        ma50_slope = round(float(close.rolling(50).mean().iloc[-1]) - float(close.rolling(50).mean().iloc[-6]), 2)
+        score = sum([price > ma50, price > ma150, price > ma200, ma50_slope > 0])
+        results.append({
+            "Ticker": ticker,
+            "Price": price,
+            "Score": score,
+            "50MA": ma50,
+            "150MA": ma150,
+            "200MA": ma200,
+            "52W High": high52,
+            "52W Low": low52,
+            "% from 50MA": pct_from_50,
+            "% from 200MA": pct_from_200,
+            "Avg Volume": avg_vol,
+            "MA Slope": ma50_slope
+        })
         stock_data[ticker] = df
     except Exception as e:
         st.warning(f"Skipped {ticker}: {e}")
@@ -43,7 +63,9 @@ status.text("Done!")
 df_results = pd.DataFrame(results).sort_values("Score", ascending=False)
 
 def color_score(val):
-    if val == 3:
+    if val == 4:
+        return "background-color: #008000; color: white"
+    elif val == 3:
         return "background-color: #1a5c1a; color: white"
     elif val == 2:
         return "background-color: #5c5c1a; color: white"
@@ -53,11 +75,27 @@ def color_score(val):
         return "background-color: #3d0000; color: white"
 
 st.subheader("📊 Scores")
-styled = df_results.style.map(color_score, subset=["Score"])
+styled = df_results[["Ticker","Price","Score","50MA","150MA","200MA","% from 50MA","% from 200MA"]].style.map(color_score, subset=["Score"])
 st.dataframe(styled, use_container_width=True)
 
-st.subheader("📈 Price Charts")
+st.subheader("🔍 Stock Detail")
 selected = st.selectbox("Select a stock", df_results["Ticker"].tolist())
+row = df_results[df_results["Ticker"] == selected].iloc[0]
+
+col1, col2, col3, col4 = st.columns(4)
+col1.metric("Price", f"${row['Price']}")
+col2.metric("Score", f"{int(row['Score'])}/4")
+col3.metric("52W High", f"${row['52W High']}")
+col4.metric("52W Low", f"${row['52W Low']}")
+
+col5, col6, col7, col8 = st.columns(4)
+col5.metric("50MA", f"${row['50MA']}")
+col6.metric("% from 50MA", f"{row['% from 50MA']}%")
+col7.metric("200MA", f"${row['200MA']}")
+col8.metric("% from 200MA", f"{row['% from 200MA']}%")
+
+st.caption(f"50-day Avg Volume: {int(row['Avg Volume']):,} | MA Slope: {row['MA Slope']}")
+
 df = stock_data[selected]
 close = df["Close"].squeeze()
 fig = go.Figure()
