@@ -1,6 +1,7 @@
 import streamlit as st
 import yfinance as yf
 import pandas as pd
+import plotly.graph_objects as go
 
 st.set_page_config(page_title="Stock Scanner", layout="wide")
 st.title("📈 SaaS Stock Scanner")
@@ -18,6 +19,7 @@ def get_stock_data(ticker):
     return df
 
 results = []
+stock_data = {}
 progress = st.progress(0)
 status = st.empty()
 
@@ -39,10 +41,18 @@ for i, ticker in enumerate(tickers):
             "200MA": ma200,
             "Score": score
         })
+        stock_data[ticker] = df
     except Exception as e:
         st.warning(f"Skipped {ticker}: {e}")
     progress.progress((i + 1) / len(tickers))
 
 status.text("Done!")
 df_results = pd.DataFrame(results).sort_values("Score", ascending=False)
+
+st.subheader("📊 Scores")
 st.dataframe(df_results, use_container_width=True)
+
+st.subheader("📈 Price Charts")
+selected = st.selectbox("Select a stock to view chart", df_results["Ticker"].tolist())
+
+if selected and selected in stock_data:
