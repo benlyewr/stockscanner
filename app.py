@@ -14,10 +14,6 @@ st.markdown("""
 <style>
 [data-testid="stMetricValue"] { font-size: 1.1rem !important; }
 [data-testid="stMetricLabel"] { font-size: 0.7rem !important; }
-.status-strong { background: #008000; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: bold; }
-.status-watch { background: #1a5c1a; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; }
-.status-early { background: #5c5c1a; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; }
-.status-ignore { background: #3d0000; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -38,14 +34,10 @@ tickers = [
 ]
 
 def get_label(score):
-    if score >= 85:
-        return "🟢 Strong Candidate"
-    elif score >= 70:
-        return "🟩 Watchlist"
-    elif score >= 55:
-        return "🟨 Early Setup"
-    else:
-        return "🔴 Ignore"
+    if score >= 85: return "🟢 Strong Candidate"
+    elif score >= 70: return "🟩 Watchlist"
+    elif score >= 55: return "🟨 Early Setup"
+    else: return "🔴 Ignore"
 
 @st.cache_data(ttl=3600)
 def get_stock_data(ticker):
@@ -83,8 +75,10 @@ def get_spy_return():
 @st.cache_data(ttl=3600)
 def get_macro():
     macro = {}
-    symbols = {"Oil": "CL=F", "Gold": "GC=F", "VIX": "^VIX", "USD": "DX-Y.NYB",
-               "1Y Treasury": "^IRX", "10Y Treasury": "^TNX", "20Y Treasury": "^TYX"}
+    symbols = {
+        "Oil": "CL=F", "Gold": "GC=F", "VIX": "^VIX", "USD": "DX-Y.NYB",
+        "1Y Treasury": "^IRX", "10Y Treasury": "^TNX", "20Y Treasury": "^TYX"
+    }
     for name, sym in symbols.items():
         try:
             df = yf.download(sym, period="5d", auto_adjust=True, progress=False)
@@ -348,7 +342,7 @@ with tab2:
     fig.add_trace(go.Scatter(x=df_plot.index, y=close_plot.rolling(50).mean(), name="50MA", line=dict(color="dodgerblue", width=1.5)), row=1, col=1)
     fig.add_trace(go.Scatter(x=df_plot.index, y=close_plot.rolling(150).mean(), name="150MA", line=dict(color="orange", width=1.5)), row=1, col=1)
     fig.add_trace(go.Scatter(x=df_plot.index, y=close_plot.rolling(200).mean(), name="200MA", line=dict(color="red", width=1.5)), row=1, col=1)
-    colors = ["lime" if float(vol_plot.iloc[i]) >= float(vol_plot.iloc[i-1]) else "red" for i in range(len(vol_plot))]
+    colors = ["lime" if i == 0 or float(vol_plot.iloc[i]) >= float(vol_plot.iloc[i-1]) else "red" for i in range(len(vol_plot))]
     fig.add_trace(go.Bar(x=df_plot.index, y=vol_plot, name="Volume", marker_color=colors, opacity=0.5), row=2, col=1)
     for s in supports:
         fig.add_hline(y=s, line_dash="dash", line_color="lime", opacity=0.4, annotation_text=f"S ${s}", row=1, col=1)
@@ -356,12 +350,18 @@ with tab2:
         fig.add_hline(y=r, line_dash="dash", line_color="tomato", opacity=0.4, annotation_text=f"R ${r}", row=1, col=1)
     if fund and fund.get('target'):
         fig.add_hline(y=fund['target'], line_dash="dot", line_color="gold", opacity=0.8, annotation_text=f"🎯 ${fund['target']:.2f}", row=1, col=1)
-    fig.update_layout(template="plotly_dark", title=f"{selected} — {timeframe}", xaxis_rangeslider_visible=False, height=600, margin=dict(l=0, r=0, t=40, b=0),
+    fig.update_layout(
+        template="plotly_dark",
+        title=f"{selected} — {timeframe}",
+        xaxis_rangeslider_visible=False,
+        height=600,
+        margin=dict(l=0, r=0, t=40, b=0),
         dragmode="drawline",
         newshape=dict(line_color="yellow"),
-        modebar_add=["drawline", "drawopenpath", "drawrect", "eraseshape"])
-    fig.update_xaxis(showgrid=False)
-    fig.update_yaxis(showgrid=True, gridcolor="#2a2a2a")
+        modebar_add=["drawline", "drawopenpath", "drawrect", "eraseshape"]
+    )
+    fig.update_xaxes(showgrid=False)
+    fig.update_yaxes(showgrid=True, gridcolor="#2a2a2a")
     st.plotly_chart(fig, use_container_width=True)
 
     sr1, sr2 = st.columns(2)
@@ -388,15 +388,15 @@ with tab3:
         df_rev = pd.DataFrame(rev_data)
         st.markdown("#### 📊 Actual Financials (Last 5 Years)")
         st.dataframe(df_rev, use_container_width=True)
-
         fig_rev = go.Figure()
         fig_rev.add_trace(go.Bar(x=df_rev["Year"], y=df_rev["Revenue ($M)"], name="Revenue", marker_color="dodgerblue"))
         fig_rev.add_trace(go.Scatter(x=df_rev["Year"], y=df_rev["EPS"], name="EPS", yaxis="y2", line=dict(color="gold", width=2)))
-        fig_rev.update_layout(template="plotly_dark", title="Revenue & EPS", yaxis=dict(title="Revenue ($M)"),
+        fig_rev.update_layout(template="plotly_dark", title="Revenue & EPS",
+            yaxis=dict(title="Revenue ($M)"),
             yaxis2=dict(title="EPS", overlaying="y", side="right"), height=350)
         st.plotly_chart(fig_rev, use_container_width=True)
     else:
-        st.info("Add FMP_API_KEY to Streamlit secrets to unlock Revenue & EPS data.")
+        st.info("Add FMP_API_KEY to Streamlit secrets to unlock full Revenue & EPS data.")
         fund2 = get_fundamentals(selected_rev)
         if fund2:
             st.markdown("#### Available from yfinance:")
@@ -430,9 +430,7 @@ with tab4:
         for k, (name, data) in enumerate(macro_items[j:j+4]):
             val = data["value"]
             chg = data["change"]
-            label = name
-            if "Treasury" in name:
-                label += " (proxy)"
+            label = name + " (proxy)" if "Treasury" in name else name
             cols[k].metric(label, f"{val}%" if "Treasury" in name else str(val), delta=f"{chg:+.2f}")
 
 with tab5:
@@ -443,18 +441,13 @@ with tab5:
             st.markdown(f"• [{item['title']}]({item['link']})  \n<small>{item['published']}</small>", unsafe_allow_html=True)
     else:
         st.info("No news found.")
-
     st.divider()
     st.markdown("#### 🌐 Global Macro News")
-    macro_feeds = [
-        ("Reuters Markets", "https://feeds.reuters.com/reuters/businessNews"),
-        ("Bloomberg Markets", "https://feeds.bloomberg.com/markets/news.rss"),
-    ]
-    for source, url in macro_feeds:
+    for source, url in [("Reuters", "https://feeds.reuters.com/reuters/businessNews")]:
         try:
             feed = feedparser.parse(url)
             st.markdown(f"**{source}**")
-            for entry in feed.entries[:3]:
+            for entry in feed.entries[:4]:
                 st.markdown(f"• [{entry.title}]({entry.link})")
         except:
             pass
