@@ -3,9 +3,19 @@ import yfinance as yf
 import pandas as pd
 import plotly.graph_objects as go
 import requests
+import fear_and_greed
 
 st.set_page_config(page_title="Stock Scanner", layout="wide")
-st.title("📈 Stock Scanner")
+
+st.markdown("""
+<style>
+[data-testid="stMetricValue"] { font-size: 1.2rem !important; }
+[data-testid="stMetricLabel"] { font-size: 0.75rem !important; }
+div[data-testid="stDataFrame"] { font-size: 0.85rem; }
+</style>
+""", unsafe_allow_html=True)
+
+st.markdown("## 📈 Stock Scanner")
 
 tickers = [
     "MSFT", "AAPL", "NVDA", "AVGO", "WDC",
@@ -22,19 +32,10 @@ def get_stock_data(ticker):
 @st.cache_data(ttl=3600)
 def get_fear_greed():
     try:
-        r = requests.get("https://api.alternative.me/fng/")
-        data = r.json()["data"][0]
-        return int(data["value"]), data["value_classification"]
+        data = fear_and_greed.get()
+        return round(data.value), data.description
     except:
         return None, None
-
-@st.cache_data(ttl=3600)
-def get_politician_trades():
-    try:
-        r = requests.get("https://www.quiverquant.com/sources/congresstrading")
-        return pd.DataFrame(r.json()).head(20)
-    except:
-        return None
 
 @st.cache_data(ttl=3600)
 def get_spy_return():
@@ -45,11 +46,12 @@ def get_spy_return():
 fg_score, fg_label = get_fear_greed()
 spy_return = get_spy_return()
 
-col_a, col_b = st.columns(2)
+c1, c2, c3 = st.columns(3)
 if fg_score:
-    color = "🟢" if fg_score > 50 else "🔴"
-    col_a.metric(f"{color} Fear & Greed Index", f"{fg_score} — {fg_label}")
-col_b.metric("📊 SPY 3M Return", f"{round(spy_return * 100, 1)}%")
+    fg_color = "🟢" if fg_score >= 60 else "🟡" if fg_score >= 40 else "🔴"
+    c1.metric(f"{fg_color} Fear & Greed", f"{fg_score} · {fg_label}")
+c2.metric("📊 SPY 3M", f"{round(spy_return * 100, 1)}%")
+c3.metric("🕐 Last Updated", pd.Timestamp.now().strftime("%d %b %H:%M"))
 
 st.divider()
 
@@ -86,23 +88,31 @@ for i, ticker in enumerate(tickers):
             "200MA": f"${ma200:.2f}",
             "52W High": f"${high52:.2f}",
             "52W Low": f"${low52:.2f}",
-            "% vs 50MA": f"{pct_from_50}%",
-            "% vs 200MA": f"{pct_from_200}%",
+            "vs 50MA": f"{pct_from_50}%",
+            "vs 200MA": f"{pct_from_200}%",
             "RS vs SPY": f"{rs}%",
             "Avg Vol": f"{int(avg_vol):,}",
-            "MA Slope": ma50_slope
+            "_ma50_slope": ma50_slope,
+            "_price_raw": price,
+            "_ma50_raw": ma50,
+            "_ma150_raw": ma150,
+            "_ma200_raw": ma200,
+            "_high52": high52,
+            "_low52": low52
         })
         stock_data[ticker] = df
     except Exception as e:
         st.warning(f"Skipped {ticker}: {e}")
     progress.progress((i + 1) / len(tickers))
 
-status.text("Done!")
+status.empty()
+progress.empty()
+
 df_results = pd.DataFrame(results).sort_values("Score", ascending=False)
 
 def color_score(val):
     if val == 4:
-        return "background-color: #008000; color: white"
+        return "background-color: #008000; color: white; font-weight: bold"
     elif val == 3:
         return "background-color: #1a5c1a; color: white"
     elif val == 2:
@@ -112,41 +122,29 @@ def color_score(val):
     else:
         return "background-color: #3d0000; color: white"
 
-st.subheader("📊 Scores")
-styled = df_results[["Ticker","Price","Score","50MA","150MA","200MA","% vs 50MA","% vs 200MA","RS vs SPY"]].style.map(color_score, subset=["Score"])
-st.dataframe(styled, use_container_width=True)
+display_cols = ["Ticker","Price","Score","50MA","150MA","200MA","vs 50MA","vs 200MA","RS vs SPY"]
+st.markdown("### 📊 Scores")
+styled = df_results[display_cols].style.map(color_score, subset=["Score"])
+st.dataframe(styled, use_container_width=True, height=400)
 
-st.subheader("🔍 Stock Detail")
-selected = st.selectbox("Select a stock", [r["Ticker"] for r in results])
+st.markdown("### 🔍 Stock Detail")
+selected = st.selectbox("", [r["Ticker"] for r in results])
 row = df_results[df_results["Ticker"] == selected].iloc[0]
 
-col1, col2, col3, col4 = st.columns(4)
-col1.metric("Price", row["Price"])
-col2.metric("Score", f"{int(row['Score'])}/4")
-col3.metric("52W High", row["52W High"])
-col4.metric("52W Low", row["52W Low"])
-
-col5, col6, col7, col8 = st.columns(4)
-col5.metric("50MA", row["50MA"])
-col6.metric("% vs 50MA", row["% vs 50MA"])
-col7.metric("200MA", row["200MA"])
-col8.metric("RS vs SPY", row["RS vs SPY"])
-
-st.caption(f"Avg Volume: {row['Avg Vol']} | MA Slope: {row['MA Slope']}")
+c1, c2, c3, c4, c5, c6 = st.columns(6)
+c1.metric("Price", row["Price"])
+c2.metric("Score", f"{int(row['Score'])}/4")
+c3.metric("52W High", row["52W High"])
+c4.metric("52W Low", row["52W Low"])
+c5.metric("vs 50MA", row["vs 50MA"])
+c6.metric("RS vs SPY", row["RS vs SPY"])
 
 df = stock_data[selected]
 close = df["Close"].squeeze()
 fig = go.Figure()
-fig.add_trace(go.Candlestick(x=df.index, open=df["Open"].squeeze(), high=df["High"].squeeze(), low=df["Low"].squeeze(), close=close, name="Price"))
-fig.add_trace(go.Scatter(x=df.index, y=close.rolling(50).mean(), name="50MA", line=dict(color="blue")))
-fig.add_trace(go.Scatter(x=df.index, y=close.rolling(150).mean(), name="150MA", line=dict(color="orange")))
-fig.add_trace(go.Scatter(x=df.index, y=close.rolling(200).mean(), name="200MA", line=dict(color="red")))
-fig.update_layout(template="plotly_dark", title=f"{selected} - 1 Year Chart", xaxis_rangeslider_visible=False, height=500)
+fig.add_trace(go.Candlestick(x=df.index, open=df["Open"].squeeze(), high=df["High"].squeeze(), low=df["Low"].squeeze(), close=close, name="Price", increasing_line_color="lime", decreasing_line_color="red"))
+fig.add_trace(go.Scatter(x=df.index, y=close.rolling(50).mean(), name="50MA", line=dict(color="dodgerblue", width=1.5)))
+fig.add_trace(go.Scatter(x=df.index, y=close.rolling(150).mean(), name="150MA", line=dict(color="orange", width=1.5)))
+fig.add_trace(go.Scatter(x=df.index, y=close.rolling(200).mean(), name="200MA", line=dict(color="red", width=1.5)))
+fig.update_layout(template="plotly_dark", title=f"{selected}", xaxis_rangeslider_visible=False, height=450, margin=dict(l=0, r=0, t=30, b=0))
 st.plotly_chart(fig, use_container_width=True)
-
-st.subheader("🏛️ Politician Trades")
-pol_data = get_politician_trades()
-if pol_data is not None:
-    st.dataframe(pol_data, use_container_width=True)
-else:
-    st.info("Politician trade data unavailable — requires Quiver Quant API key.")
