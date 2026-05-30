@@ -288,23 +288,49 @@ with st.spinner("Loading all stocks..."):
             profit_margin = fund.get("profit_margin")
             forward_pe = fund.get("forward_pe")
 
-            score = 0
-            if reversal_123: score += 25
-            if price > ma50: score += 5
-            if price > ma150: score += 5
-            if price > ma200: score += 5
-            if ma50 > ma150 > ma200: score += 15
-            if ma50_slope > 0: score += 10
-            if ma200_slope > 0: score += 10
-            if rs > 0: score += 10
-            if rs > 10: score += 10
-            if rev_growth and rev_growth > 0: score += 15
-            if earnings_growth and earnings_growth > 0: score += 10
-            if profit_margin and profit_margin > 0: score += 5
-            if forward_pe and 0 < forward_pe < 60: score += 5
-            if fg_score and fg_score >= 75: score -= 10
-            # Cap score at 100
-            score = max(0, min(score, 100))
+score = 0
+
+# Technicals: max 45
+if reversal_123:
+    score += 20
+
+if ma50 > ma150 > ma200:
+    score += 15
+
+if ma50_slope > 0 and ma200_slope > 0:
+    score += 10
+
+# Relative strength: max 15
+if rs > 10:
+    score += 15
+elif rs > 0:
+    score += 8
+
+# Fundamentals: max 25
+if rev_growth and rev_growth > 0.15:
+    score += 10
+elif rev_growth and rev_growth > 0:
+    score += 5
+
+if earnings_growth and earnings_growth > 0.10:
+    score += 10
+elif earnings_growth and earnings_growth > 0:
+    score += 5
+
+if profit_margin and profit_margin > 0:
+    score += 5
+
+# Valuation: max 10
+if forward_pe and 0 < forward_pe < 40:
+    score += 10
+elif forward_pe and 40 <= forward_pe < 70:
+    score += 5
+
+# Sentiment penalty
+if fg_score and fg_score >= 75:
+    score -= 5
+
+score = max(0, min(score, 100))
 
             results.append({
                 "Ticker": ticker,
