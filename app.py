@@ -4,6 +4,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import requests
 import fear_and_greed
+import feedparser
 
 st.set_page_config(page_title="Stock Scanner", layout="wide")
 
@@ -42,6 +43,19 @@ def get_spy_return():
     spy = yf.download("SPY", period="3mo", auto_adjust=True, progress=False)
     close = spy["Close"].squeeze()
     return float(close.iloc[-1]) / float(close.iloc[0]) - 1
+
+@st.cache_data(ttl=1800)
+def get_stock_news(ticker):
+    url = f"https://feeds.finance.yahoo.com/rss/2.0/headline?s={ticker}&region=US&lang=en-US"
+    feed = feedparser.parse(url)
+    news = []
+    for entry in feed.entries[:5]:
+        news.append({
+            "title": entry.title,
+            "link": entry.link,
+            "published": entry.published
+        })
+    return news
 
 fg_score, fg_label = get_fear_greed()
 spy_return = get_spy_return()
@@ -148,3 +162,11 @@ fig.add_trace(go.Scatter(x=df.index, y=close.rolling(150).mean(), name="150MA", 
 fig.add_trace(go.Scatter(x=df.index, y=close.rolling(200).mean(), name="200MA", line=dict(color="red", width=1.5)))
 fig.update_layout(template="plotly_dark", title=f"{selected}", xaxis_rangeslider_visible=False, height=450, margin=dict(l=0, r=0, t=30, b=0))
 st.plotly_chart(fig, use_container_width=True)
+
+st.markdown("### 📰 Latest News")
+news = get_stock_news(selected)
+if news:
+    for item in news:
+        st.markdown(f"• [{item['title']}]({item['link']})  \n<small>{item['published']}</small>", unsafe_allow_html=True)
+else:
+    st.info("No news found.")
