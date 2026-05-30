@@ -12,11 +12,14 @@ st.set_page_config(page_title="Stock Scanner V2", layout="wide")
 
 st.markdown("""
 <style>
-[data-testid="stMetricValue"] { font-size: 1rem !important; }
-[data-testid="stMetricLabel"] { font-size: 0.65rem !important; color: #aaa; }
+* { color: white !important; }
+[data-testid="stMetricValue"] { font-size: 1rem !important; color: white !important; }
+[data-testid="stMetricLabel"] { font-size: 0.65rem !important; color: #cccccc !important; }
+[data-testid="stMetricDelta"] { font-size: 0.75rem !important; }
 [data-testid="stMetric"] { background: #1a1a2e; border-radius: 8px; padding: 8px 12px; border: 1px solid #2a2a3e; }
 div[data-testid="stHorizontalBlock"] { gap: 8px; }
-.big-metric { font-size: 1.4rem; font-weight: bold; }
+.stDataFrame { color: white !important; }
+p, h1, h2, h3, h4, h5, h6, label, span { color: white !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -41,6 +44,13 @@ def get_label(score):
     elif score >= 70: return "🟩 Watchlist"
     elif score >= 55: return "🟨 Early"
     else: return "🔴 Ignore"
+
+def fmt_cap(val):
+    if not val: return "N/A"
+    if val >= 1e12: return f"${val/1e12:.2f}T"
+    if val >= 1e9: return f"${val/1e9:.1f}B"
+    if val >= 1e6: return f"${val/1e6:.1f}M"
+    return f"${val:,.0f}"
 
 @st.cache_data(ttl=3600)
 def get_stock_data(ticker):
@@ -123,13 +133,29 @@ def get_fundamentals(ticker):
             "eps_forward": info.get("forwardEps"),
             "eps_trailing": info.get("trailingEps"),
             "market_cap": info.get("marketCap"),
-            "52w_high": info.get("fiftyTwoWeekHigh"),
-            "52w_low": info.get("fiftyTwoWeekLow"),
-            "avg_volume": info.get("averageVolume"),
             "shares_outstanding": info.get("sharesOutstanding"),
         }
     except:
         return {}
+
+@st.cache_data(ttl=3600)
+def get_institutional_holders(ticker):
+    try:
+        stock = yf.Ticker(ticker)
+        inst = stock.institutional_holders
+        if inst is not None and not inst.empty:
+            inst = inst.head(10).copy()
+            if "pctHeld" in inst.columns:
+                inst["% Held"] = (inst["pctHeld"] * 100).round(2).astype(str) + "%"
+            elif "% Out" in inst.columns:
+                inst["% Held"] = inst["% Out"]
+            if "Value" in inst.columns:
+                inst["Value ($M)"] = (inst["Value"] / 1e6).round(1)
+            cols = [c for c in ["Holder", "Shares", "% Held", "Value ($M)", "Date Reported"] if c in inst.columns]
+            return inst[cols]
+        return None
+    except:
+        return None
 
 @st.cache_data(ttl=3600)
 def get_fmp_financials(ticker):
@@ -250,6 +276,7 @@ with st.spinner("Loading all stocks..."):
                 "Price": f"${price:.2f}",
                 "Score": score,
                 "Label": get_label(score),
+                "Mkt Cap": fmt_cap(fund.get("market_cap")),
                 "50MA": f"${ma50:.2f}",
                 "200MA": f"${ma200:.2f}",
                 "52W High": f"${high52:.2f}",
@@ -284,7 +311,7 @@ with tab1:
         elif val >= 55: return "background-color: #5c5c1a; color: white"
         else: return "background-color: #3d0000; color: white"
 
-    display_cols = ["Ticker","Price","Score","Label","50MA","200MA","vs 50MA","vs 200MA","vs 52W High","RS vs SPY","123 Rev"]
+    display_cols = ["Ticker","Price","Mkt Cap","Score","Label","50MA","200MA","vs 50MA","vs 200MA","vs 52W High","RS vs SPY","123 Rev"]
     styled = df_results[display_cols].style.map(color_score, subset=["Score"])
     st.dataframe(styled, use_container_width=True, height=500)
 
@@ -301,15 +328,16 @@ with tab2:
 
     st.markdown(f"### {selected} — {row['Label']}")
 
-    c1, c2, c3, c4, c5, c6, c7, c8 = st.columns(8)
+    c1, c2, c3, c4, c5, c6, c7, c8, c9 = st.columns(9)
     c1.metric("Price", row["Price"])
     c2.metric("Score", f"{int(row['Score'])}/100")
-    c3.metric("52W High", row["52W High"])
-    c4.metric("52W Low", row["52W Low"])
-    c5.metric("vs 52W High", row["vs 52W High"])
-    c6.metric("RS vs SPY", row["RS vs SPY"])
-    c7.metric("vs 50MA", row["vs 50MA"])
-    c8.metric("vs 200MA", row["vs 200MA"])
+    c3.metric("Mkt Cap", row["Mkt Cap"])
+    c4.metric("52W High", row["52W High"])
+    c5.metric("52W Low", row["52W Low"])
+    c6.metric("vs 52W High", row["vs 52W High"])
+    c7.metric("RS vs SPY", row["RS vs SPY"])
+    c8.metric("vs 50MA", row["vs 50MA"])
+    c9.metric("vs 200MA", row["vs 200MA"])
 
     if fund:
         st.markdown("---")
@@ -340,6 +368,9 @@ with tab2:
     close_plot = df_plot["Close"].squeeze()
     vol_plot = df_plot["Volume"].squeeze()
 
+    if st.button("↩️ Undo Last Drawing", key="undo_btn"):
+        st.session_state["undo_shapes"] = True
+
     fig = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.78, 0.22], vertical_spacing=0.01)
     fig.add_trace(go.Scatter(x=df_plot.index, y=close_plot, name="Price", line=dict(color="white", width=2)), row=1, col=1)
     fig.add_trace(go.Scatter(x=df_plot.index, y=close_plot.rolling(50).mean(), name="50MA", line=dict(color="dodgerblue", width=1.5)), row=1, col=1)
@@ -354,19 +385,20 @@ with tab2:
         fig.add_hline(y=fund['target'], line_dash="dot", line_color="gold", opacity=0.9, annotation_text=f"🎯 ${fund['target']:.2f}", row=1, col=1)
     fig.update_layout(
         template="plotly_dark",
-        title=dict(text=f"{selected} — {timeframe}", font=dict(size=16)),
+        title=dict(text=f"{selected} — {timeframe}", font=dict(size=16, color="white")),
         xaxis_rangeslider_visible=False,
-        height=580,
+        height=600,
         margin=dict(l=10, r=10, t=40, b=10),
-        legend=dict(orientation="h", y=1.05, x=0),
+        legend=dict(orientation="h", y=1.05, x=0, font=dict(color="white")),
         dragmode="drawline",
         newshape=dict(line_color="yellow"),
         modebar_add=["drawline", "drawopenpath", "drawrect", "eraseshape"],
         plot_bgcolor="#0e0e1a",
-        paper_bgcolor="#0e0e1a"
+        paper_bgcolor="#0e0e1a",
+        font=dict(color="white")
     )
-    fig.update_xaxes(showgrid=False, zeroline=False)
-    fig.update_yaxes(showgrid=True, gridcolor="#1e1e2e", zeroline=False)
+    fig.update_xaxes(showgrid=False, zeroline=False, color="white")
+    fig.update_yaxes(showgrid=True, gridcolor="#1e1e2e", zeroline=False, color="white")
     st.plotly_chart(fig, use_container_width=True)
 
     sr1, sr2 = st.columns(2)
@@ -374,6 +406,14 @@ with tab2:
     for s in supports: sr1.markdown(f"• ${s}")
     sr2.markdown("**🔴 Resistance**")
     for r in resistances: sr2.markdown(f"• ${r}")
+
+    st.markdown("---")
+    st.markdown("### 🏦 Institutional Ownership")
+    inst_data = get_institutional_holders(selected)
+    if inst_data is not None and not inst_data.empty:
+        st.dataframe(inst_data, use_container_width=True)
+    else:
+        st.info("No institutional data available for this ticker.")
 
 with tab3:
     selected_rev = st.selectbox("Select stock", df_results["Ticker"].tolist(), key="rev_select")
@@ -397,9 +437,10 @@ with tab3:
         fig_rev.add_trace(go.Bar(x=df_rev["Year"], y=df_rev["Revenue ($M)"], name="Revenue", marker_color="dodgerblue"))
         fig_rev.add_trace(go.Scatter(x=df_rev["Year"], y=df_rev["EPS"], name="EPS", yaxis="y2", line=dict(color="gold", width=2)))
         fig_rev.update_layout(template="plotly_dark", title="Revenue & EPS",
-            yaxis=dict(title="Revenue ($M)"),
-            yaxis2=dict(title="EPS", overlaying="y", side="right"), height=350,
-            paper_bgcolor="#0e0e1a", plot_bgcolor="#0e0e1a")
+            yaxis=dict(title="Revenue ($M)", color="white"),
+            yaxis2=dict(title="EPS", overlaying="y", side="right", color="white"),
+            height=350, paper_bgcolor="#0e0e1a", plot_bgcolor="#0e0e1a",
+            font=dict(color="white"))
         st.plotly_chart(fig_rev, use_container_width=True)
     else:
         st.info("Add FMP_API_KEY to Streamlit secrets to unlock full Revenue & EPS data.")
