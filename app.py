@@ -14,16 +14,18 @@ tickers = [
 
 @st.cache_data(ttl=3600)
 def get_stock_data(ticker):
-    df = yf.download(ticker, period="1y", auto_adjust=True)
+    df = yf.download(ticker, period="1y", auto_adjust=True, progress=False)
     return df
 
 results = []
 progress = st.progress(0)
+status = st.empty()
 
 for i, ticker in enumerate(tickers):
     try:
+        status.text(f"Loading {ticker}...")
         df = get_stock_data(ticker)
-        close = df["Close"]
+        close = df["Close"].squeeze()
         price = round(float(close.iloc[-1]), 2)
         ma50 = round(float(close.rolling(50).mean().iloc[-1]), 2)
         ma150 = round(float(close.rolling(150).mean().iloc[-1]), 2)
@@ -37,9 +39,10 @@ for i, ticker in enumerate(tickers):
             "200MA": ma200,
             "Score": score
         })
-    except:
-        pass
+    except Exception as e:
+        st.warning(f"Skipped {ticker}: {e}")
     progress.progress((i + 1) / len(tickers))
 
+status.text("Done!")
 df_results = pd.DataFrame(results).sort_values("Score", ascending=False)
 st.dataframe(df_results, use_container_width=True)
