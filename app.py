@@ -41,8 +41,24 @@ for i, ticker in enumerate(tickers):
 
 status.text("Done!")
 df_results = pd.DataFrame(results).sort_values("Score", ascending=False)
+
+def color_score(val):
+    if val == 3:
+        return "background-color: #1a5c1a; color: white"
+    elif val == 2:
+        return "background-color: #5c5c1a; color: white"
+    elif val == 1:
+        return "background-color: #5c2a1a; color: white"
+    else:
+        return "background-color: #3d0000; color: white"
+
+def color_price_vs_ma(val):
+    return "color: #00ff00" if val else "color: #ff4444"
+
 st.subheader("📊 Scores")
-st.dataframe(df_results, use_container_width=True)
+styled = df_results.style.applymap(color_score, subset=["Score"])
+st.dataframe(styled, use_container_width=True)
+
 st.subheader("📈 Price Charts")
 selected = st.selectbox("Select a stock", df_results["Ticker"].tolist())
 df = stock_data[selected]
