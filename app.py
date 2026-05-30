@@ -12,17 +12,50 @@ st.set_page_config(page_title="Stock Scanner V2", layout="wide")
 
 st.markdown("""
 <style>
-* { color: white !important; }
-[data-testid="stMetricValue"] { font-size: 1rem !important; color: white !important; }
-[data-testid="stMetricLabel"] { font-size: 0.65rem !important; color: #cccccc !important; }
-[data-testid="stMetricDelta"] { font-size: 0.75rem !important; }
-[data-testid="stMetric"] { background: #1a1a2e; border-radius: 8px; padding: 8px 12px; border: 1px solid #2a2a3e; }
-div[data-testid="stHorizontalBlock"] { gap: 8px; }
-.stDataFrame { color: white !important; }
-p, h1, h2, h3, h4, h5, h6, label, span { color: white !important; }
+
+/* Tabs */
+button[data-baseweb="tab"] p {
+    color: black !important;
+    font-weight: 600;
+}
+
+button[data-baseweb="tab"][aria-selected="true"] p {
+    color: #2563eb !important;
+    font-weight: 700;
+}
+
+/* Metrics */
+[data-testid="stMetricValue"] {
+    font-size: 1rem !important;
+    color: white !important;
+}
+
+[data-testid="stMetricLabel"] {
+    font-size: 0.65rem !important;
+    color: #cccccc !important;
+}
+
+[data-testid="stMetricDelta"] {
+    font-size: 0.75rem !important;
+}
+
+[data-testid="stMetric"] {
+    background: #1a1a2e;
+    border-radius: 8px;
+    padding: 8px 12px;
+    border: 1px solid #2a2a3e;
+}
+
+div[data-testid="stHorizontalBlock"] {
+    gap: 8px;
+}
+
+.stDataFrame {
+    color: white !important;
+}
+
 </style>
 """, unsafe_allow_html=True)
-
 st.markdown("## 📈 Stock Scanner V2")
 
 FMP_API_KEY = st.secrets.get("FMP_API_KEY", None)
@@ -270,6 +303,8 @@ with st.spinner("Loading all stocks..."):
             if profit_margin and profit_margin > 0: score += 5
             if forward_pe and 0 < forward_pe < 60: score += 5
             if fg_score and fg_score >= 75: score -= 10
+            # Cap score at 100
+            score = max(0, min(score, 100))
 
             results.append({
                 "Ticker": ticker,
