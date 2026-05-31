@@ -167,7 +167,6 @@ def get_institutional_holders(ticker):
     try:
         stock = yf.Ticker(ticker)
         holders_list = []
-
         try:
             inst = stock.institutional_holders
             if inst is not None and not inst.empty:
@@ -176,7 +175,6 @@ def get_institutional_holders(ticker):
                 holders_list.append(inst)
         except:
             pass
-
         try:
             major = stock.major_holders
             if major is not None and not major.empty:
@@ -185,7 +183,6 @@ def get_institutional_holders(ticker):
                 return major
         except:
             pass
-
         try:
             mutual = stock.mutualfund_holders
             if mutual is not None and not mutual.empty:
@@ -194,11 +191,8 @@ def get_institutional_holders(ticker):
                 holders_list.append(mutual)
         except:
             pass
-
         if holders_list:
-            df_holders = pd.concat(holders_list, ignore_index=True)
-            return df_holders.head(15)
-
+            return pd.concat(holders_list, ignore_index=True).head(15)
         return None
     except:
         return None
@@ -584,52 +578,69 @@ with tab2:
 
     for _, brow in breakdown_df.iterrows():
         pts = brow["Points"]
-        icon = "✅" if pts > 0 else "❌" if pts < 0 else "⬜"
-        color = "#1a5c1a" if pts > 0 else "#5c0000" if pts < 0 else "#2a2a2a"
-        st.markdown(f"""
-<div style="
-    background:{color};
-    border-radius:8px;
-    padding:8px 12px;
-    margin:4px 0;
-    display:flex;
-    justify-content:space-between;
-    align-items:center;
-    color:white !important;
-">
-    <span style="color:white !important; font-weight:600;">{icon} {brow['Category']}</span>
-    <span style="color:white !important; font-weight:bold;">{'+' if pts > 0 else ''}{pts}</span>
-</div>
-<div style="
-    color:#aaaaaa !important;
-    font-size:0.78rem;
-    padding:2px 12px 8px;
-">
-    {brow['Reason']}
-</div>
-""", unsafe_allow_html=True)
+        if pts > 0:
+            bg_color = "#166534"
+            text_color = "#FFFFFF"
+            icon = "✅"
+        elif pts < 0:
+            bg_color = "#991B1B"
+            text_color = "#FFFFFF"
+            icon = "❌"
+        else:
+            bg_color = "#374151"
+            text_color = "#FFFFFF"
+            icon = "➖"
+
+        st.markdown(
+            f"""
+            <div style="
+                background:{bg_color};
+                color:{text_color};
+                padding:10px 14px;
+                border-radius:8px;
+                margin-bottom:4px;
+                font-weight:600;
+                display:flex;
+                justify-content:space-between;
+                align-items:center;
+            ">
+                <span>{icon} {brow['Category']}</span>
+                <span>{'+' if pts > 0 else ''}{pts}</span>
+            </div>
+            <div style="
+                padding:2px 14px 10px;
+                color:#6B7280;
+                font-size:0.8rem;
+            ">
+                {brow['Reason']}
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
 
     df = stock_data[selected]
     close = df["Close"].squeeze()
     vol = df["Volume"].squeeze()
     supports, resistances = get_support_resistance(close.iloc[-252:])
 
-    nearest_support = supports[0] if supports else None
-    nearest_resistance = resistances[0] if resistances else None
-    latest_volume = int(vol.iloc[-1])
-    avg_volume_50 = int(vol.rolling(50).mean().iloc[-1])
-    chart_supports = supports[:2]
-    chart_resistances = resistances[:2]
-
     st.markdown("---")
     st.markdown("### 📌 Chart Levels")
-    level_cols = st.columns(4)
-    level_cols[0].metric("Current Price", row["Price"])
-    level_cols[1].metric("Nearest Support", f"${nearest_support}" if nearest_support else "N/A")
-    level_cols[2].metric("Nearest Resistance", f"${nearest_resistance}" if nearest_resistance else "N/A")
-    level_cols[3].metric("Analyst Target", f"${fund['target']:.2f}" if fund and fund.get("target") else "N/A")
+
+    lvl1, lvl2, lvl3, lvl4 = st.columns(4)
+    lvl1.metric("Current Price", row["Price"])
+    lvl2.metric("Target", f"${fund['target']:.2f}" if fund and fund.get("target") else "N/A")
+    lvl3.metric("Support 1", f"${supports[0]}" if len(supports) > 0 else "N/A")
+    lvl4.metric("Resistance 1", f"${resistances[0]}" if len(resistances) > 0 else "N/A")
+
+    lvl5, lvl6, lvl7, lvl8 = st.columns(4)
+    lvl5.metric("Support 2", f"${supports[1]}" if len(supports) > 1 else "N/A")
+    lvl6.metric("Support 3", f"${supports[2]}" if len(supports) > 2 else "N/A")
+    lvl7.metric("Resistance 2", f"${resistances[1]}" if len(resistances) > 1 else "N/A")
+    lvl8.metric("Resistance 3", f"${resistances[2]}" if len(resistances) > 2 else "N/A")
 
     vol_cols = st.columns(3)
+    latest_volume = int(vol.iloc[-1])
+    avg_volume_50 = int(vol.rolling(50).mean().iloc[-1])
     vol_cols[0].metric("Volume Ratio", row["Vol Ratio"])
     vol_cols[1].metric("Latest Volume", f"{latest_volume:,}")
     vol_cols[2].metric("50D Avg Volume", f"{avg_volume_50:,}")
@@ -654,6 +665,8 @@ with tab2:
 
     close_plot = df_plot["Close"].squeeze()
     vol_plot = df_plot["Volume"].squeeze()
+    chart_supports = supports[:2]
+    chart_resistances = resistances[:2]
 
     rows_count = 2 if show_volume else 1
     row_heights = [0.78, 0.22] if show_volume else [1.0]
@@ -669,15 +682,12 @@ with tab2:
 
     if show_sr:
         for s in chart_supports:
-            fig.add_hline(y=s, line_dash="dash", line_color="lime", opacity=0.35,
-                annotation_text=f"Support ${s}", annotation_position="bottom left", row=1, col=1)
+            fig.add_hline(y=s, line_dash="dash", line_color="lime", opacity=0.35, row=1, col=1)
         for r in chart_resistances:
-            fig.add_hline(y=r, line_dash="dash", line_color="tomato", opacity=0.35,
-                annotation_text=f"Resistance ${r}", annotation_position="top left", row=1, col=1)
+            fig.add_hline(y=r, line_dash="dash", line_color="tomato", opacity=0.35, row=1, col=1)
 
     if show_target and fund and fund.get('target'):
-        fig.add_hline(y=fund['target'], line_dash="dot", line_color="gold", opacity=0.8,
-            annotation_text=f"Target ${fund['target']:.2f}", annotation_position="top right", row=1, col=1)
+        fig.add_hline(y=fund['target'], line_dash="dot", line_color="gold", opacity=0.8, row=1, col=1)
 
     fig.update_layout(
         template="plotly_dark",
