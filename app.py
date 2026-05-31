@@ -167,32 +167,42 @@ def get_institutional_holders(ticker):
     try:
         stock = yf.Ticker(ticker)
         holders_list = []
+
         try:
             inst = stock.institutional_holders
             if inst is not None and not inst.empty:
-                inst = inst.copy()
-                inst["Source"] = "Institutional"
+                inst = inst.head(10).copy()
+                cols_to_keep = []
+                for col in inst.columns:
+                    col_lower = str(col).lower()
+                    if any(k in col_lower for k in ["holder", "shares", "pct", "%", "value", "date"]):
+                        cols_to_keep.append(col)
+                if cols_to_keep:
+                    inst = inst[cols_to_keep]
+                inst["Type"] = "Institution"
                 holders_list.append(inst)
         except:
             pass
-        try:
-            major = stock.major_holders
-            if major is not None and not major.empty:
-                major = major.reset_index()
-                major.columns = ["Metric", "Value"] if len(major.columns) == 2 else major.columns
-                return major
-        except:
-            pass
+
         try:
             mutual = stock.mutualfund_holders
             if mutual is not None and not mutual.empty:
-                mutual = mutual.head(10).copy()
-                mutual["Source"] = "Mutual Fund"
+                mutual = mutual.head(5).copy()
+                cols_to_keep = []
+                for col in mutual.columns:
+                    col_lower = str(col).lower()
+                    if any(k in col_lower for k in ["holder", "shares", "pct", "%", "value", "date"]):
+                        cols_to_keep.append(col)
+                if cols_to_keep:
+                    mutual = mutual[cols_to_keep]
+                mutual["Type"] = "Mutual Fund"
                 holders_list.append(mutual)
         except:
             pass
+
         if holders_list:
-            return pd.concat(holders_list, ignore_index=True).head(15)
+            combined = pd.concat(holders_list, ignore_index=True)
+            return combined
         return None
     except:
         return None
@@ -580,43 +590,20 @@ with tab2:
         pts = brow["Points"]
         if pts > 0:
             bg_color = "#166534"
-            text_color = "#FFFFFF"
             icon = "✅"
         elif pts < 0:
             bg_color = "#991B1B"
-            text_color = "#FFFFFF"
             icon = "❌"
         else:
             bg_color = "#374151"
-            text_color = "#FFFFFF"
             icon = "➖"
-
-        st.markdown(
-            f"""
-            <div style="
-                background:{bg_color};
-                color:{text_color};
-                padding:10px 14px;
-                border-radius:8px;
-                margin-bottom:4px;
-                font-weight:600;
-                display:flex;
-                justify-content:space-between;
-                align-items:center;
-            ">
-                <span>{icon} {brow['Category']}</span>
-                <span>{'+' if pts > 0 else ''}{pts}</span>
-            </div>
-            <div style="
-                padding:2px 14px 10px;
-                color:#6B7280;
-                font-size:0.8rem;
-            ">
-                {brow['Reason']}
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
+        st.markdown(f"""
+        <div style="background:{bg_color};color:#FFFFFF;padding:10px 14px;border-radius:8px;margin-bottom:4px;font-weight:600;display:flex;justify-content:space-between;align-items:center;">
+            <span>{icon} {brow['Category']}</span>
+            <span>{'+' if pts > 0 else ''}{pts}</span>
+        </div>
+        <div style="padding:2px 14px 10px;color:#9CA3AF;font-size:0.8rem;">{brow['Reason']}</div>
+        """, unsafe_allow_html=True)
 
     df = stock_data[selected]
     close = df["Close"].squeeze()
@@ -680,21 +667,60 @@ with tab2:
         colors = ["lime" if i == 0 or float(vol_plot.iloc[i]) >= float(vol_plot.iloc[i-1]) else "red" for i in range(len(vol_plot))]
         fig.add_trace(go.Bar(x=df_plot.index, y=vol_plot, name="Volume", marker_color=colors, opacity=0.4), row=2, col=1)
 
+    label_x = df_plot.index[-1]
+
     if show_sr:
-        for s in chart_supports:
-            fig.add_hline(y=s, line_dash="dash", line_color="lime", opacity=0.35, row=1, col=1)
-        for r in chart_resistances:
-            fig.add_hline(y=r, line_dash="dash", line_color="tomato", opacity=0.35, row=1, col=1)
+        used_y_positions = []
+        for i, s in enumerate(chart_supports):
+            adj_y = float(s)
+            for used_y in used_y_positions:
+                if abs(adj_y - used_y) / max(abs(used_y), 0.001) < 0.015:
+                    adj_y = adj_y * (1 - 0.015 * (i + 1))
+            used_y_positions.append(adj_y)
+            fig.add_hline(y=float(s), line_dash="dash", line_color="lime", opacity=0.35, row=1, col=1)
+            fig.add_annotation(
+                x=label_x, y=adj_y,
+                text=f"S{i+1}: ${s}",
+                showarrow=False, xanchor="left", yanchor="middle",
+                bgcolor="rgba(0,160,0,0.75)",
+                font=dict(color="white", size=11),
+                borderpad=3
+            )
+
+        used_y_positions_r = []
+        for i, r in enumerate(chart_resistances):
+            adj_y = float(r)
+            for used_y in used_y_positions_r:
+                if abs(adj_y - used_y) / max(abs(used_y), 0.001) < 0.015:
+                    adj_y = adj_y * (1 + 0.015 * (i + 1))
+            used_y_positions_r.append(adj_y)
+            fig.add_hline(y=float(r), line_dash="dash", line_color="tomato", opacity=0.35, row=1, col=1)
+            fig.add_annotation(
+                x=label_x, y=adj_y,
+                text=f"R{i+1}: ${r}",
+                showarrow=False, xanchor="left", yanchor="middle",
+                bgcolor="rgba(200,50,50,0.75)",
+                font=dict(color="white", size=11),
+                borderpad=3
+            )
 
     if show_target and fund and fund.get('target'):
         fig.add_hline(y=fund['target'], line_dash="dot", line_color="gold", opacity=0.8, row=1, col=1)
+        fig.add_annotation(
+            x=label_x, y=fund['target'],
+            text=f"Target: ${fund['target']:.2f}",
+            showarrow=False, xanchor="left", yanchor="middle",
+            bgcolor="rgba(200,160,0,0.85)",
+            font=dict(color="white", size=11),
+            borderpad=3
+        )
 
     fig.update_layout(
         template="plotly_dark",
         title=dict(text=f"{selected} — {timeframe}", font=dict(size=16, color="white")),
         xaxis_rangeslider_visible=False,
         height=580,
-        margin=dict(l=5, r=5, t=40, b=5),
+        margin=dict(l=5, r=100, t=40, b=5),
         legend=dict(orientation="h", y=1.05, x=0, font=dict(color="white")),
         dragmode="drawline",
         newshape=dict(line_color="yellow"),
@@ -723,8 +749,8 @@ with tab2:
     if inst_data is not None and not inst_data.empty:
         st.dataframe(inst_data, use_container_width=True)
     else:
-        st.info("No institutional ownership data available from Yahoo Finance for this ticker.")
-    st.caption("Institutional ownership data depends on Yahoo Finance availability and may be missing for some tickers.")
+        st.info("No detailed holder data available from Yahoo Finance for this ticker.")
+    st.caption("Data sourced from Yahoo Finance. May be delayed or unavailable for some tickers.")
 
 with tab3:
     selected_rev = st.selectbox("Select stock", df_results["Ticker"].tolist(), key="rev_select")
