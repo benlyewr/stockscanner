@@ -46,7 +46,7 @@ tickers = [
     "NBIS", "MU", "DRAM", "VST", "HWM",
     "RDDT", "TSM", "ADI", "SNDK", "STRL",
     "BA", "APLD", "MSTR", "MARA", "MELI",
-    "RCL", "MRVL", "TSLA", "ARM"
+    "RCL", "MRVL", "TSLA", "ARM", "ADBE"
 ]
 
 def get_label(score):
@@ -155,6 +155,9 @@ def get_fundamentals(ticker):
             "eps_trailing": info.get("trailingEps"),
             "market_cap": info.get("marketCap"),
             "shares_outstanding": info.get("sharesOutstanding"),
+            "held_percent_institutions": info.get("heldPercentInstitutions"),
+            "held_percent_insiders": info.get("heldPercentInsiders"),
+            "float_shares": info.get("floatShares"),
         }
     except:
         return {}
@@ -163,17 +166,39 @@ def get_fundamentals(ticker):
 def get_institutional_holders(ticker):
     try:
         stock = yf.Ticker(ticker)
-        inst = stock.institutional_holders
-        if inst is not None and not inst.empty:
-            inst = inst.head(10).copy()
-            if "pctHeld" in inst.columns:
-                inst["% Held"] = (inst["pctHeld"] * 100).round(2).astype(str) + "%"
-            elif "% Out" in inst.columns:
-                inst["% Held"] = inst["% Out"]
-            if "Value" in inst.columns:
-                inst["Value ($M)"] = (inst["Value"] / 1e6).round(1)
-            cols = [c for c in ["Holder", "Shares", "% Held", "Value ($M)", "Date Reported"] if c in inst.columns]
-            return inst[cols]
+        holders_list = []
+
+        try:
+            inst = stock.institutional_holders
+            if inst is not None and not inst.empty:
+                inst = inst.copy()
+                inst["Source"] = "Institutional"
+                holders_list.append(inst)
+        except:
+            pass
+
+        try:
+            major = stock.major_holders
+            if major is not None and not major.empty:
+                major = major.reset_index()
+                major.columns = ["Metric", "Value"] if len(major.columns) == 2 else major.columns
+                return major
+        except:
+            pass
+
+        try:
+            mutual = stock.mutualfund_holders
+            if mutual is not None and not mutual.empty:
+                mutual = mutual.head(10).copy()
+                mutual["Source"] = "Mutual Fund"
+                holders_list.append(mutual)
+        except:
+            pass
+
+        if holders_list:
+            df_holders = pd.concat(holders_list, ignore_index=True)
+            return df_holders.head(15)
+
         return None
     except:
         return None
@@ -272,7 +297,7 @@ with st.spinner("Loading all stocks..."):
             rsi_series = calculate_rsi(close_1y).dropna()
             current_rsi = round(float(rsi_series.iloc[-1]), 1) if not rsi_series.empty else 50
             avg_vol_50 = float(vol.rolling(50).mean().iloc[-1])
-            volume_ratio = round(float(vol.iloc[-1]) / avg_vol_50, 2)
+            volume_ratio = round(float(vol.iloc[-1]) / avg_vol_50, 2) if avg_vol_50 and avg_vol_50 > 0 else 0
 
             if current_rsi >= 80: rsi_status = "‼️ Extremely Overbought"
             elif current_rsi >= 70: rsi_status = "⚠️ Overbought"
@@ -561,16 +586,53 @@ with tab2:
         pts = brow["Points"]
         icon = "✅" if pts > 0 else "❌" if pts < 0 else "⬜"
         color = "#1a5c1a" if pts > 0 else "#5c0000" if pts < 0 else "#2a2a2a"
-        st.markdown(f"""<div style="background:{color};border-radius:6px;padding:6px 12px;margin:3px 0;display:flex;justify-content:space-between;">
-            <span>{icon} {brow['Category']}</span>
-            <span style="font-weight:bold;">{'+' if pts > 0 else ''}{pts}</span>
-        </div>
-        <div style="color:#aaa;font-size:0.75rem;padding:0 12px 4px;">{brow['Reason']}</div>""", unsafe_allow_html=True)
+        st.markdown(f"""
+<div style="
+    background:{color};
+    border-radius:8px;
+    padding:8px 12px;
+    margin:4px 0;
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    color:white !important;
+">
+    <span style="color:white !important; font-weight:600;">{icon} {brow['Category']}</span>
+    <span style="color:white !important; font-weight:bold;">{'+' if pts > 0 else ''}{pts}</span>
+</div>
+<div style="
+    color:#aaaaaa !important;
+    font-size:0.78rem;
+    padding:2px 12px 8px;
+">
+    {brow['Reason']}
+</div>
+""", unsafe_allow_html=True)
 
     df = stock_data[selected]
     close = df["Close"].squeeze()
     vol = df["Volume"].squeeze()
     supports, resistances = get_support_resistance(close.iloc[-252:])
+
+    nearest_support = supports[0] if supports else None
+    nearest_resistance = resistances[0] if resistances else None
+    latest_volume = int(vol.iloc[-1])
+    avg_volume_50 = int(vol.rolling(50).mean().iloc[-1])
+    chart_supports = supports[:2]
+    chart_resistances = resistances[:2]
+
+    st.markdown("---")
+    st.markdown("### 📌 Chart Levels")
+    level_cols = st.columns(4)
+    level_cols[0].metric("Current Price", row["Price"])
+    level_cols[1].metric("Nearest Support", f"${nearest_support}" if nearest_support else "N/A")
+    level_cols[2].metric("Nearest Resistance", f"${nearest_resistance}" if nearest_resistance else "N/A")
+    level_cols[3].metric("Analyst Target", f"${fund['target']:.2f}" if fund and fund.get("target") else "N/A")
+
+    vol_cols = st.columns(3)
+    vol_cols[0].metric("Volume Ratio", row["Vol Ratio"])
+    vol_cols[1].metric("Latest Volume", f"{latest_volume:,}")
+    vol_cols[2].metric("50D Avg Volume", f"{avg_volume_50:,}")
 
     st.markdown("---")
     show_sr = st.checkbox("Show Support/Resistance", value=True)
@@ -606,13 +668,16 @@ with tab2:
         fig.add_trace(go.Bar(x=df_plot.index, y=vol_plot, name="Volume", marker_color=colors, opacity=0.4), row=2, col=1)
 
     if show_sr:
-        for s in supports:
-            fig.add_hline(y=s, line_dash="dash", line_color="lime", opacity=0.4, annotation_text=f"S ${s}", row=1, col=1)
-        for r in resistances:
-            fig.add_hline(y=r, line_dash="dash", line_color="tomato", opacity=0.4, annotation_text=f"R ${r}", row=1, col=1)
+        for s in chart_supports:
+            fig.add_hline(y=s, line_dash="dash", line_color="lime", opacity=0.35,
+                annotation_text=f"Support ${s}", annotation_position="bottom left", row=1, col=1)
+        for r in chart_resistances:
+            fig.add_hline(y=r, line_dash="dash", line_color="tomato", opacity=0.35,
+                annotation_text=f"Resistance ${r}", annotation_position="top left", row=1, col=1)
 
     if show_target and fund and fund.get('target'):
-        fig.add_hline(y=fund['target'], line_dash="dot", line_color="gold", opacity=0.9, annotation_text=f"🎯 ${fund['target']:.2f}", row=1, col=1)
+        fig.add_hline(y=fund['target'], line_dash="dot", line_color="gold", opacity=0.8,
+            annotation_text=f"Target ${fund['target']:.2f}", annotation_position="top right", row=1, col=1)
 
     fig.update_layout(
         template="plotly_dark",
@@ -637,11 +702,19 @@ with tab2:
 
     st.markdown("---")
     st.markdown("### 🏦 Institutional Ownership")
+
+    own1, own2, own3, own4 = st.columns(4)
+    own1.metric("Institution Held", f"{fund.get('held_percent_institutions')*100:.1f}%" if fund and fund.get('held_percent_institutions') else "N/A")
+    own2.metric("Insider Held", f"{fund.get('held_percent_insiders')*100:.1f}%" if fund and fund.get('held_percent_insiders') else "N/A")
+    own3.metric("Shares Out", f"{fund.get('shares_outstanding'):,}" if fund and fund.get('shares_outstanding') else "N/A")
+    own4.metric("Float Shares", f"{fund.get('float_shares'):,}" if fund and fund.get('float_shares') else "N/A")
+
     inst_data = get_institutional_holders(selected)
     if inst_data is not None and not inst_data.empty:
         st.dataframe(inst_data, use_container_width=True)
     else:
-        st.info("No institutional data available.")
+        st.info("No institutional ownership data available from Yahoo Finance for this ticker.")
+    st.caption("Institutional ownership data depends on Yahoo Finance availability and may be missing for some tickers.")
 
 with tab3:
     selected_rev = st.selectbox("Select stock", df_results["Ticker"].tolist(), key="rev_select")
