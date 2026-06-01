@@ -56,6 +56,87 @@ def get_label(score):
     elif score >= 50: return "🟧 Early"
     else: return "🔴 Ignore"
 
+def get_buy_label(score):
+    if score >= 80: return "🟢 Strong Buy Setup"
+    elif score >= 60: return "🟩 Good Buy Setup"
+    elif score >= 40: return "🟨 Watch Buy Setup"
+    else: return "⬜ No Buy Setup"
+
+def get_sell_label(score):
+    if score >= 80: return "🔴 Strong Sell Warning"
+    elif score >= 60: return "🟠 Reduce Risk Warning"
+    elif score >= 40: return "🟡 Watch for Weakness"
+    else: return "🟢 No Major Sell Signal"
+
+def get_buy_score(row_data, fund):
+    score = 0
+    signals = []
+    if row_data.get("_ma50_slope", 0) > 0:
+        score += 15
+        signals.append("✅ 50MA slope rising")
+    if row_data.get("_ma200_slope", 0) > 0:
+        score += 10
+        signals.append("✅ 200MA slope rising")
+    rsi = row_data.get("_rsi_raw", 50)
+    if 50 <= rsi <= 70:
+        score += 15
+        signals.append("✅ RSI in healthy zone 50-70")
+    rs = row_data.get("_rs_raw", 0)
+    if rs > 10:
+        score += 20
+        signals.append(f"✅ Outperforming SPY by {rs:.1f}%")
+    elif rs > 0:
+        score += 10
+        signals.append(f"✅ Outperforming SPY by {rs:.1f}%")
+    rev = row_data.get("_rev_growth_raw")
+    if rev and rev > 0.20:
+        score += 20
+        signals.append("✅ Revenue growth >20%")
+    elif rev and rev > 0.10:
+        score += 10
+        signals.append("✅ Revenue growth >10%")
+    if fund:
+        if fund.get("earnings_growth") and fund["earnings_growth"] > 0.20:
+            score += 20
+            signals.append("✅ Earnings growth >20%")
+        elif fund.get("earnings_growth") and fund["earnings_growth"] > 0.10:
+            score += 10
+            signals.append("✅ Earnings growth >10%")
+    return min(score, 100), signals
+
+def get_sell_score(row_data, fund):
+    score = 0
+    signals = []
+    rsi = row_data.get("_rsi_raw", 50)
+    if rsi >= 80:
+        score += 30
+        signals.append(f"⚠️ RSI extremely overbought ({rsi})")
+    elif rsi >= 70:
+        score += 15
+        signals.append(f"⚠️ RSI overbought ({rsi})")
+    rs = row_data.get("_rs_raw", 0)
+    if rs < -10:
+        score += 25
+        signals.append(f"⚠️ Underperforming SPY by {abs(rs):.1f}%")
+    elif rs < 0:
+        score += 10
+        signals.append("⚠️ Underperforming SPY slightly")
+    if row_data.get("_ma50_slope", 0) < 0:
+        score += 20
+        signals.append("⚠️ 50MA slope falling")
+    if row_data.get("_ma200_slope", 0) < 0:
+        score += 15
+        signals.append("⚠️ 200MA slope falling")
+    rev = row_data.get("_rev_growth_raw")
+    if rev and rev < 0:
+        score += 20
+        signals.append("⚠️ Revenue declining")
+    if fund:
+        if fund.get("forward_pe") and fund["forward_pe"] > 60:
+            score += 10
+            signals.append(f"⚠️ High forward PE ({fund['forward_pe']:.1f})")
+    return min(score, 100), signals
+
 def fmt_cap(val):
     if not val: return "N/A"
     if val >= 1e12: return f"${val/1e12:.2f}T"
@@ -167,7 +248,6 @@ def get_institutional_holders(ticker):
     try:
         stock = yf.Ticker(ticker)
         holders_list = []
-
         try:
             inst = stock.institutional_holders
             if inst is not None and not inst.empty:
@@ -183,7 +263,6 @@ def get_institutional_holders(ticker):
                 holders_list.append(inst)
         except:
             pass
-
         try:
             mutual = stock.mutualfund_holders
             if mutual is not None and not mutual.empty:
@@ -199,10 +278,8 @@ def get_institutional_holders(ticker):
                 holders_list.append(mutual)
         except:
             pass
-
         if holders_list:
-            combined = pd.concat(holders_list, ignore_index=True)
-            return combined
+            return pd.concat(holders_list, ignore_index=True).head(15)
         return None
     except:
         return None
@@ -436,6 +513,17 @@ with st.spinner("Loading all stocks..."):
 
             score = max(0, min(score, 100))
 
+            row_data = {
+                "_price_raw": price,
+                "_rs_raw": rs,
+                "_rev_growth_raw": rev_growth,
+                "_rsi_raw": current_rsi,
+                "_ma50_slope": ma50_slope,
+                "_ma200_slope": ma200_slope,
+            }
+            buy_score, buy_signals = get_buy_score(row_data, fund)
+            sell_score, sell_signals = get_sell_score(row_data, fund)
+
             results.append({
                 "Ticker": ticker,
                 "Price": f"${price:.2f}",
@@ -457,6 +545,10 @@ with st.spinner("Loading all stocks..."):
                 "vs 52W High": f"{pct_from_high}%",
                 "RS vs SPY": f"{rs}%",
                 "123 Rev": "✅" if reversal_123 else "❌",
+                "Buy Score": buy_score,
+                "Buy Label": get_buy_label(buy_score),
+                "Sell Score": sell_score,
+                "Sell Label": get_sell_label(sell_score),
                 "_price_raw": price,
                 "_rs_raw": rs,
                 "_rev_growth_raw": rev_growth,
@@ -464,7 +556,9 @@ with st.spinner("Loading all stocks..."):
                 "_ma50_slope": ma50_slope,
                 "_ma200_slope": ma200_slope,
                 "_fund": fund,
-                "_scoring_breakdown": scoring_breakdown
+                "_scoring_breakdown": scoring_breakdown,
+                "_buy_signals": buy_signals,
+                "_sell_signals": sell_signals,
             })
             stock_data[ticker] = df
         except Exception as e:
@@ -481,7 +575,16 @@ df_results = pd.DataFrame(results).sort_values("Score", ascending=False)
 if skipped:
     st.warning(f"Could not load: {', '.join(skipped)}")
 
-tab0, tab1, tab2, tab3, tab4, tab5 = st.tabs(["⚡ Quick Scan", "📊 Scanner", "📈 Chart", "💰 Revenue & EPS", "🌍 Macro", "📰 News"])
+tab0, tab1, tab_buy, tab_sell, tab2, tab3, tab4, tab5 = st.tabs([
+    "⚡ Quick Scan",
+    "📊 Scanner",
+    "🟢 Buying Signals",
+    "🔴 Selling Signals",
+    "🔎 Analysis",
+    "💰 Revenue & EPS",
+    "🌍 Macro",
+    "📰 News"
+])
 
 with tab0:
     st.markdown("### ⚡ Quick Scan — Daily Watchlist")
@@ -521,7 +624,7 @@ with tab1:
         elif val >= 50: return "background-color: #5c5c1a; color: white"
         else: return "background-color: #3d0000; color: white"
 
-    display_cols = ["Ticker","Price","Mkt Cap","Score","Label","RSI","RSI Status","50MA","200MA","vs 50MA","vs 200MA","vs 52W High","RS vs SPY","123 Rev","Vol Ratio","Vol Status","Extension","52W Status"]
+    display_cols = ["Ticker","Price","Mkt Cap","Score","Label","Buy Score","Buy Label","Sell Score","Sell Label","RSI","RSI Status","50MA","200MA","vs 50MA","vs 200MA","vs 52W High","RS vs SPY","123 Rev","Vol Ratio","Vol Status","Extension","52W Status"]
     styled = df_results[display_cols].style.map(color_score, subset=["Score"])
     st.dataframe(styled, use_container_width=True, height=500)
 
@@ -532,11 +635,52 @@ with tab1:
     c4.metric("🟧 Early", len(df_results[(df_results["Score"] >= 50) & (df_results["Score"] < 65)]))
     c5.metric("🔴 Ignore", len(df_results[df_results["Score"] < 50]))
 
+with tab_buy:
+    st.markdown("### 🟢 Buying Signals")
+    st.caption("Stocks showing possible buy setups — Buy Score ≥ 60")
+    buy_df = df_results[df_results["Buy Score"] >= 60].sort_values("Buy Score", ascending=False)
+    if buy_df.empty:
+        st.info("No strong buying setups today.")
+    else:
+        st.success(f"✅ {len(buy_df)} stocks with possible buy setups")
+        for _, brow in buy_df.iterrows():
+            with st.expander(f"{brow['Ticker']} — {brow['Buy Label']} — Buy Score {brow['Buy Score']}"):
+                b1, b2, b3, b4 = st.columns(4)
+                b1.metric("Price", brow["Price"])
+                b2.metric("Overall Score", f"{brow['Score']}/100")
+                b3.metric("Buy Score", f"{brow['Buy Score']}/100")
+                b4.metric("RS vs SPY", brow["RS vs SPY"])
+                st.markdown("**Buy Setup Signals:**")
+                for sig in brow["_buy_signals"]:
+                    st.markdown(f"  {sig}")
+
+with tab_sell:
+    st.markdown("### 🔴 Selling Signals")
+    st.caption("Stocks showing possible sell/risk warnings — Sell Score ≥ 60")
+    sell_df = df_results[df_results["Sell Score"] >= 60].sort_values("Sell Score", ascending=False)
+    if sell_df.empty:
+        st.info("No major sell warnings today.")
+    else:
+        st.warning(f"⚠️ {len(sell_df)} stocks with possible risk warnings")
+        for _, srow in sell_df.iterrows():
+            with st.expander(f"{srow['Ticker']} — {srow['Sell Label']} — Sell Score {srow['Sell Score']}"):
+                s1, s2, s3, s4 = st.columns(4)
+                s1.metric("Price", srow["Price"])
+                s2.metric("Overall Score", f"{srow['Score']}/100")
+                s3.metric("Sell Score", f"{srow['Sell Score']}/100")
+                s4.metric("RSI", srow["RSI"])
+                st.markdown("**Risk Warning Signals:**")
+                for sig in srow["_sell_signals"]:
+                    st.markdown(f"  {sig}")
+
 with tab2:
     selected = st.selectbox("🔍 Search stock", df_results["Ticker"].tolist())
     row = df_results[df_results["Ticker"] == selected].iloc[0]
     fund = row["_fund"]
+    supports, resistances = get_support_resistance(stock_data[selected]["Close"].squeeze().iloc[-252:])
 
+    # 1. Executive Summary
+    st.markdown("### 📋 Executive Summary")
     warnings = []
     if "Overbought" in row["RSI Status"]: warnings.append(row["RSI Status"])
     if "Oversold" in row["RSI Status"]: warnings.append(row["RSI Status"])
@@ -545,37 +689,88 @@ with tab2:
     if warnings:
         st.warning(" | ".join(warnings))
     else:
-        st.success("✅ No major overbought/oversold warnings")
+        st.success("✅ No major warnings")
 
-    st.markdown(f"### {selected} — {row['Label']}")
+    st.markdown(f"#### {selected} — {row['Label']}")
+    e1, e2, e3, e4 = st.columns(4)
+    e1.metric("Price", row["Price"])
+    e2.metric("Overall Score", f"{int(row['Score'])}/100")
+    e3.metric("Mkt Cap", row["Mkt Cap"])
+    e4.metric("Label", row["Label"])
 
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Price", row["Price"])
-    c2.metric("Score", f"{int(row['Score'])}/100")
-    c3.metric("RSI", row["RSI"])
-    c4.metric("Mkt Cap", row["Mkt Cap"])
+    e5, e6, e7, e8 = st.columns(4)
+    e5.metric("🟢 Buy Score", f"{row['Buy Score']}/100")
+    e6.metric("Buy Setup", row["Buy Label"])
+    e7.metric("🔴 Sell Score", f"{row['Sell Score']}/100")
+    e8.metric("Sell Warning", row["Sell Label"])
 
-    c5, c6, c7, c8 = st.columns(4)
-    c5.metric("52W High", row["52W High"])
-    c6.metric("vs 52W High", row["vs 52W High"])
-    c7.metric("RS vs SPY", row["RS vs SPY"])
-    c8.metric("RSI Status", row["RSI Status"])
+    if fund:
+        e9, e10, e11, e12 = st.columns(4)
+        e9.metric("🎯 Target", f"${fund['target']:.2f}" if fund.get('target') else "N/A")
+        e10.metric("📈 Upside", f"{fund['upside']}%" if fund.get('upside') else "N/A")
+        e11.metric("💚 Str Buy", fund.get('strong_buy', 0))
+        e12.metric("🟢 Buy", fund.get('buy', 0))
+
+    st.markdown("---")
+
+    # 2. Signal Summary
+    st.markdown("### 📡 Signal Summary")
+    sig_col1, sig_col2 = st.columns(2)
+    with sig_col1:
+        st.markdown("#### ✅ Buy Setup Signals")
+        if row["_buy_signals"]:
+            for sig in row["_buy_signals"]:
+                st.markdown(f"""
+                <div style="background:#166534;color:#FFFFFF;padding:8px 12px;border-radius:6px;margin-bottom:4px;font-size:0.9rem;">
+                    {sig}
+                </div>""", unsafe_allow_html=True)
+        else:
+            st.info("No active buy setup signals")
+
+    with sig_col2:
+        st.markdown("#### ⚠️ Risk Warning Signals")
+        if row["_sell_signals"]:
+            for sig in row["_sell_signals"]:
+                st.markdown(f"""
+                <div style="background:#991B1B;color:#FFFFFF;padding:8px 12px;border-radius:6px;margin-bottom:4px;font-size:0.9rem;">
+                    {sig}
+                </div>""", unsafe_allow_html=True)
+        else:
+            st.success("No active risk warning signals")
+
+    st.markdown("---")
+
+    # 3. Technical Analysis
+    st.markdown("### 📊 Technical Analysis")
+    t1, t2, t3, t4 = st.columns(4)
+    t1.metric("RSI", row["RSI"])
+    t2.metric("RSI Status", row["RSI Status"])
+    t3.metric("Vol Ratio", row["Vol Ratio"])
+    t4.metric("Vol Status", row["Vol Status"])
+
+    t5, t6, t7, t8 = st.columns(4)
+    t5.metric("vs 50MA", row["vs 50MA"])
+    t6.metric("vs 200MA", row["vs 200MA"])
+    t7.metric("RS vs SPY", row["RS vs SPY"])
+    t8.metric("Extension", row["Extension"])
+
+    t9, t10, t11, t12 = st.columns(4)
+    t9.metric("52W High", row["52W High"])
+    t10.metric("vs 52W High", row["vs 52W High"])
+    t11.metric("52W Low", row["52W Low"])
+    t12.metric("52W Status", row["52W Status"])
 
     if fund:
         st.markdown("---")
-        d1, d2, d3, d4 = st.columns(4)
-        d1.metric("🎯 Target", f"${fund['target']:.2f}" if fund.get('target') else "N/A")
-        d2.metric("📈 Upside", f"{fund['upside']}%" if fund.get('upside') else "N/A")
-        d3.metric("💰 Rev Growth", f"{round(fund['rev_growth']*100,1)}%" if fund.get('rev_growth') else "N/A")
-        d4.metric("📉 Fwd PE", f"{round(fund['forward_pe'],1)}" if fund.get('forward_pe') else "N/A")
-
-        d5, d6, d7, d8 = st.columns(4)
-        d5.metric("💵 Margin", f"{round(fund['profit_margin']*100,1)}%" if fund.get('profit_margin') else "N/A")
-        d6.metric("💚 Str Buy", fund.get('strong_buy', 0))
-        d7.metric("🟢 Buy", fund.get('buy', 0))
-        d8.metric("🟡 Hold", fund.get('hold', 0))
+        f1, f2, f3, f4 = st.columns(4)
+        f1.metric("💰 Rev Growth", f"{round(fund['rev_growth']*100,1)}%" if fund.get('rev_growth') else "N/A")
+        f2.metric("📉 Fwd PE", f"{round(fund['forward_pe'],1)}" if fund.get('forward_pe') else "N/A")
+        f3.metric("💵 Margin", f"{round(fund['profit_margin']*100,1)}%" if fund.get('profit_margin') else "N/A")
+        f4.metric("🟡 Hold", fund.get('hold', 0))
 
     st.markdown("---")
+
+    # 4. Score Breakdown
     st.markdown("### 🧮 Score Breakdown")
     breakdown_df = pd.DataFrame(row["_scoring_breakdown"], columns=["Category", "Points", "Reason"])
     positive_points = breakdown_df[breakdown_df["Points"] > 0]["Points"].sum()
@@ -605,13 +800,13 @@ with tab2:
         <div style="padding:2px 14px 10px;color:#9CA3AF;font-size:0.8rem;">{brow['Reason']}</div>
         """, unsafe_allow_html=True)
 
+    st.markdown("---")
+
+    # 5. Chart Levels
+    st.markdown("### 📌 Chart Levels")
     df = stock_data[selected]
     close = df["Close"].squeeze()
     vol = df["Volume"].squeeze()
-    supports, resistances = get_support_resistance(close.iloc[-252:])
-
-    st.markdown("---")
-    st.markdown("### 📌 Chart Levels")
 
     lvl1, lvl2, lvl3, lvl4 = st.columns(4)
     lvl1.metric("Current Price", row["Price"])
@@ -633,6 +828,9 @@ with tab2:
     vol_cols[2].metric("50D Avg Volume", f"{avg_volume_50:,}")
 
     st.markdown("---")
+
+    # 6. Interactive Chart
+    st.markdown("### 📈 Interactive Chart")
     show_sr = st.checkbox("Show Support/Resistance", value=True)
     show_target = st.checkbox("Show Analyst Target", value=True)
     show_volume = st.checkbox("Show Volume", value=True)
@@ -737,8 +935,9 @@ with tab2:
         st.rerun()
 
     st.markdown("---")
-    st.markdown("### 🏦 Institutional Ownership")
 
+    # 7. Institutional Ownership
+    st.markdown("### 🏦 Institutional Ownership")
     own1, own2, own3, own4 = st.columns(4)
     own1.metric("Institution Held", f"{fund.get('held_percent_institutions')*100:.1f}%" if fund and fund.get('held_percent_institutions') else "N/A")
     own2.metric("Insider Held", f"{fund.get('held_percent_insiders')*100:.1f}%" if fund and fund.get('held_percent_insiders') else "N/A")
