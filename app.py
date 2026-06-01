@@ -216,15 +216,33 @@ def get_fundamental_score(actuals, estimates):
             else:
                 fundamental_warnings.append("⚠️ Pre-tax income declining")
 
-        # Future revenue estimates — rising quarter by quarter is good
+        # Actual revenue vs estimate — beating estimates is good
+        if estimates and len(estimates) > 0:
+            try:
+                est_rev = estimates[0].get("estimatedRevenueAvg", 0)
+                actual_rev = actuals[0].get("revenue", 0)
+                if est_rev and actual_rev:
+                    beat_pct = (actual_rev - est_rev) / max(abs(est_rev), 1)
+                    if beat_pct > 0.05:
+                        fundamental_score += 25
+                        fundamental_signals.append(f"✅ Strong revenue beat above estimate by {beat_pct*100:.1f}%")
+                    elif beat_pct > 0:
+                        fundamental_score += 15
+                        fundamental_signals.append(f"✅ Actual revenue beat estimate by {beat_pct*100:.1f}%")
+                    else:
+                        fundamental_warnings.append(f"⚠️ Revenue missed estimate by {abs(beat_pct)*100:.1f}%")
+            except:
+                pass
+
+        # Future revenue estimates — rising across upcoming periods is good
         if estimates and len(estimates) >= 2:
             try:
                 fut_revs = [e.get("estimatedRevenueAvg", 0) for e in estimates]
                 if all(fut_revs[i] < fut_revs[i+1] for i in range(len(fut_revs)-1)):
                     fundamental_score += 25
-                    fundamental_signals.append("✅ Future revenue estimates rising quarter by quarter")
+                    fundamental_signals.append("✅ Future revenue estimates are rising across upcoming periods")
                 else:
-                    fundamental_warnings.append("⚠️ Future revenue estimates not consistently rising")
+                    fundamental_warnings.append("⚠️ Future revenue estimates are not consistently rising across upcoming periods")
             except:
                 pass
 
@@ -559,7 +577,7 @@ with st.spinner("Loading all stocks..."):
                 "52W High": f"${high52:.2f}", "52W Low": f"${low52:.2f}",
                 "vs 50MA": f"{pct_from_50}%", "vs 200MA": f"{pct_from_200}%",
                 "vs 52W High": f"{pct_from_high}%", "RS vs SPY": f"{rs}%",
-                "123 Rev": "✅" if reversal_123 else "❌",
+                "1-2-3 Reversal": "✅" if reversal_123 else "❌",
                 "Buy Setup": buy_score,  "Buy Label": get_buy_label(buy_score),
                 "Risk Score": risk_score,"Risk Label": get_risk_label(risk_score),
                 "Net Score": net_score,  "Fund Score": fundamental_score,
@@ -639,7 +657,7 @@ with tab1:
         "Ticker","Price","Mkt Cap","Score","Label","Verdict",
         "Buy Setup","Buy Label","Risk Score","Risk Label","Net Score","Fund Score",
         "RSI","RSI Status","50MA","200MA","vs 50MA","vs 200MA","vs 52W High",
-        "RS vs SPY","123 Rev","Vol Ratio","Vol Status","Extension","52W Status"
+        "RS vs SPY","1-2-3 Reversal","Vol Ratio","Vol Status","Extension","52W Status"
     ]
     st.dataframe(df_results[display_cols].style.map(color_score, subset=["Score"]), use_container_width=True, height=500)
 
