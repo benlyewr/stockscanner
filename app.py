@@ -15,15 +15,8 @@ st.markdown("""
 [data-testid="stMetricValue"] { font-size: 1rem !important; color: white !important; }
 [data-testid="stMetricLabel"] { font-size: 0.65rem !important; color: #cccccc !important; }
 [data-testid="stMetric"] { background: #1a1a2e; border-radius: 8px; padding: 8px 12px; border: 1px solid #2a2a3e; }
-.stTabs [data-baseweb="tab"] p {
-    color: black !important;
-    font-size: 0.85rem;
-    font-weight: 600;
-}
-.stTabs [data-baseweb="tab"][aria-selected="true"] p {
-    color: #2563eb !important;
-    font-weight: 700;
-}
+.stTabs [data-baseweb="tab"] p { color: black !important; font-size: 0.85rem; font-weight: 600; }
+.stTabs [data-baseweb="tab"][aria-selected="true"] p { color: #2563eb !important; font-weight: 700; }
 .stTabs [data-baseweb="tab-list"] { gap: 4px; }
 @media (max-width: 768px) {
     [data-testid="stMetricValue"] { font-size: 0.85rem !important; }
@@ -56,86 +49,29 @@ def get_label(score):
     elif score >= 50: return "🟧 Early"
     else: return "🔴 Ignore"
 
+def get_verdict(overall, buy_score, risk_score):
+    if overall >= 80 and buy_score >= 70 and risk_score <= 30:
+        return "🟢 Strong Buy Setup"
+    elif overall >= 65 and risk_score <= 40:
+        return "🟨 Watchlist"
+    elif risk_score >= 80:
+        return "🔴 Avoid"
+    elif risk_score >= 60:
+        return "🟠 Elevated Risk"
+    else:
+        return "⬜ Neutral"
+
 def get_buy_label(score):
     if score >= 80: return "🟢 Strong Buy Setup"
     elif score >= 60: return "🟩 Good Buy Setup"
     elif score >= 40: return "🟨 Watch Buy Setup"
     else: return "⬜ No Buy Setup"
 
-def get_sell_label(score):
-    if score >= 80: return "🔴 Strong Sell Warning"
-    elif score >= 60: return "🟠 Reduce Risk Warning"
-    elif score >= 40: return "🟡 Watch for Weakness"
-    else: return "🟢 No Major Sell Signal"
-
-def get_buy_score(row_data, fund):
-    score = 0
-    signals = []
-    if row_data.get("_ma50_slope", 0) > 0:
-        score += 15
-        signals.append("✅ 50MA slope rising")
-    if row_data.get("_ma200_slope", 0) > 0:
-        score += 10
-        signals.append("✅ 200MA slope rising")
-    rsi = row_data.get("_rsi_raw", 50)
-    if 50 <= rsi <= 70:
-        score += 15
-        signals.append("✅ RSI in healthy zone 50-70")
-    rs = row_data.get("_rs_raw", 0)
-    if rs > 10:
-        score += 20
-        signals.append(f"✅ Outperforming SPY by {rs:.1f}%")
-    elif rs > 0:
-        score += 10
-        signals.append(f"✅ Outperforming SPY by {rs:.1f}%")
-    rev = row_data.get("_rev_growth_raw")
-    if rev and rev > 0.20:
-        score += 20
-        signals.append("✅ Revenue growth >20%")
-    elif rev and rev > 0.10:
-        score += 10
-        signals.append("✅ Revenue growth >10%")
-    if fund:
-        if fund.get("earnings_growth") and fund["earnings_growth"] > 0.20:
-            score += 20
-            signals.append("✅ Earnings growth >20%")
-        elif fund.get("earnings_growth") and fund["earnings_growth"] > 0.10:
-            score += 10
-            signals.append("✅ Earnings growth >10%")
-    return min(score, 100), signals
-
-def get_sell_score(row_data, fund):
-    score = 0
-    signals = []
-    rsi = row_data.get("_rsi_raw", 50)
-    if rsi >= 80:
-        score += 30
-        signals.append(f"⚠️ RSI extremely overbought ({rsi})")
-    elif rsi >= 70:
-        score += 15
-        signals.append(f"⚠️ RSI overbought ({rsi})")
-    rs = row_data.get("_rs_raw", 0)
-    if rs < -10:
-        score += 25
-        signals.append(f"⚠️ Underperforming SPY by {abs(rs):.1f}%")
-    elif rs < 0:
-        score += 10
-        signals.append("⚠️ Underperforming SPY slightly")
-    if row_data.get("_ma50_slope", 0) < 0:
-        score += 20
-        signals.append("⚠️ 50MA slope falling")
-    if row_data.get("_ma200_slope", 0) < 0:
-        score += 15
-        signals.append("⚠️ 200MA slope falling")
-    rev = row_data.get("_rev_growth_raw")
-    if rev and rev < 0:
-        score += 20
-        signals.append("⚠️ Revenue declining")
-    if fund:
-        if fund.get("forward_pe") and fund["forward_pe"] > 60:
-            score += 10
-            signals.append(f"⚠️ High forward PE ({fund['forward_pe']:.1f})")
-    return min(score, 100), signals
+def get_risk_label(score):
+    if score >= 80: return "🔴 High Risk"
+    elif score >= 60: return "🟠 Elevated Risk"
+    elif score >= 40: return "🟡 Moderate Risk"
+    else: return "🟢 Low Risk"
 
 def fmt_cap(val):
     if not val: return "N/A"
@@ -151,19 +87,159 @@ def calculate_rsi(close, period=14):
     avg_gain = gain.rolling(period).mean()
     avg_loss = loss.rolling(period).mean()
     rs = avg_gain / avg_loss
-    rsi = 100 - (100 / (1 + rs))
-    return rsi
+    return 100 - (100 / (1 + rs))
+
+def get_buy_score(row_data, fund, fundamental_score=0):
+    score = 0
+    signals = []
+    if row_data.get("_ma50_slope", 0) > 0:
+        score += 15; signals.append("✅ 50MA slope rising")
+    if row_data.get("_ma200_slope", 0) > 0:
+        score += 10; signals.append("✅ 200MA slope rising")
+    rsi = row_data.get("_rsi_raw", 50)
+    if 50 <= rsi <= 70:
+        score += 15; signals.append("✅ RSI in healthy zone 50-70")
+    rs = row_data.get("_rs_raw", 0)
+    if rs > 10:
+        score += 20; signals.append(f"✅ Outperforming SPY by {rs:.1f}%")
+    elif rs > 0:
+        score += 10; signals.append(f"✅ Outperforming SPY by {rs:.1f}%")
+    rev = row_data.get("_rev_growth_raw")
+    if rev and rev > 0.20:
+        score += 20; signals.append("✅ Revenue growth >20%")
+    elif rev and rev > 0.10:
+        score += 10; signals.append("✅ Revenue growth >10%")
+    if fund:
+        eg = fund.get("earnings_growth")
+        if eg and eg > 0.20:
+            score += 20; signals.append("✅ Earnings growth >20%")
+        elif eg and eg > 0.10:
+            score += 10; signals.append("✅ Earnings growth >10%")
+    if fundamental_score >= 80:
+        score += 20; signals.append("✅ Strong fundamental quality score")
+    elif fundamental_score >= 60:
+        score += 10; signals.append("✅ Good fundamental quality score")
+    return min(score, 100), signals
+
+def get_risk_score(row_data, fund, fundamental_score=0):
+    score = 0
+    signals = []
+    rsi = row_data.get("_rsi_raw", 50)
+    if rsi >= 80:
+        score += 30; signals.append(f"⚠️ RSI extremely overbought ({rsi})")
+    elif rsi >= 70:
+        score += 15; signals.append(f"⚠️ RSI overbought ({rsi})")
+    rs = row_data.get("_rs_raw", 0)
+    if rs < -10:
+        score += 25; signals.append(f"⚠️ Underperforming SPY by {abs(rs):.1f}%")
+    elif rs < 0:
+        score += 10; signals.append("⚠️ Underperforming SPY slightly")
+    if row_data.get("_ma50_slope", 0) < 0:
+        score += 20; signals.append("⚠️ 50MA slope falling")
+    if row_data.get("_ma200_slope", 0) < 0:
+        score += 15; signals.append("⚠️ 200MA slope falling")
+    rev = row_data.get("_rev_growth_raw")
+    if rev and rev < 0:
+        score += 20; signals.append("⚠️ Revenue declining")
+    if fund and fund.get("forward_pe") and fund["forward_pe"] > 60:
+        score += 10; signals.append(f"⚠️ High forward PE ({fund['forward_pe']:.1f})")
+    if fundamental_score < 40:
+        score += 15; signals.append("⚠️ Weak fundamental quality score")
+    return min(score, 100), signals
+
+def get_fundamental_score(actuals, estimates):
+    fundamental_score = 0
+    fundamental_signals = []
+    fundamental_warnings = []
+
+    if not actuals or len(actuals) < 2:
+        return 0, [], ["⚠️ N/A — add FMP_API_KEY for full fundamental scoring"]
+
+    try:
+        revenues          = [item.get("revenue", 0)          for item in reversed(actuals)]
+        gross_profits     = [item.get("grossProfit", 0)       for item in reversed(actuals)]
+        operating_incomes = [item.get("operatingIncome", 0)   for item in reversed(actuals)]
+        pretax_incomes    = [item.get("incomeBeforeTax", 0)   for item in reversed(actuals)]
+        op_expenses       = [item.get("operatingExpenses", 0) for item in reversed(actuals)]
+        cogs_list         = [item.get("costOfRevenue", 0)     for item in reversed(actuals)]
+
+        # Revenue trend — increasing is good
+        if len(revenues) >= 3:
+            if all(revenues[i] < revenues[i+1] for i in range(len(revenues)-1)):
+                fundamental_score += 20
+                fundamental_signals.append("✅ Revenue has increased year-on-year")
+            else:
+                fundamental_warnings.append("⚠️ Revenue not consistently increasing")
+
+        # Gross profit trend — increasing is good
+        if len(gross_profits) >= 3:
+            if all(gross_profits[i] < gross_profits[i+1] for i in range(len(gross_profits)-1)):
+                fundamental_score += 15
+                fundamental_signals.append("✅ Gross profit increasing year-on-year")
+            else:
+                fundamental_warnings.append("⚠️ Gross profit not consistently increasing")
+
+        # COGS vs gross profit
+        if len(cogs_list) >= 2 and len(gross_profits) >= 2:
+            if cogs_list[-1] > cogs_list[-2] and gross_profits[-1] > gross_profits[-2]:
+                fundamental_score += 5
+                fundamental_signals.append("✅ COGS rising alongside revenue and gross profit")
+            elif cogs_list[-1] > cogs_list[-2] and gross_profits[-1] <= gross_profits[-2]:
+                fundamental_warnings.append("⚠️ COGS rising while gross profit is weakening")
+
+        # Operating expenses vs revenue — declining or growing slower than revenue is good
+        if len(op_expenses) >= 2 and len(revenues) >= 2:
+            opex_growth = (op_expenses[-1] - op_expenses[-2]) / max(abs(op_expenses[-2]), 1)
+            rev_growth_rate = (revenues[-1] - revenues[-2]) / max(abs(revenues[-2]), 1)
+            if op_expenses[-1] < op_expenses[-2]:
+                fundamental_score += 10
+                fundamental_signals.append("✅ Operating expenses declining — good cost control")
+            elif opex_growth < rev_growth_rate:
+                fundamental_score += 5
+                fundamental_signals.append("✅ Operating expenses growing slower than revenue")
+            else:
+                fundamental_warnings.append("⚠️ Operating expenses growing faster than revenue")
+
+        # Operating income trend — increasing is good
+        if len(operating_incomes) >= 2:
+            if operating_incomes[-1] > operating_incomes[-2]:
+                fundamental_score += 15
+                fundamental_signals.append("✅ Operating income increasing — business becoming more profitable")
+            else:
+                fundamental_warnings.append("⚠️ Operating income declining")
+
+        # Pre-tax income trend — increasing is good
+        if len(pretax_incomes) >= 2:
+            if pretax_incomes[-1] > pretax_incomes[-2]:
+                fundamental_score += 10
+                fundamental_signals.append("✅ Pre-tax income increasing")
+            else:
+                fundamental_warnings.append("⚠️ Pre-tax income declining")
+
+        # Future revenue estimates — rising quarter by quarter is good
+        if estimates and len(estimates) >= 2:
+            try:
+                fut_revs = [e.get("estimatedRevenueAvg", 0) for e in estimates]
+                if all(fut_revs[i] < fut_revs[i+1] for i in range(len(fut_revs)-1)):
+                    fundamental_score += 25
+                    fundamental_signals.append("✅ Future revenue estimates rising quarter by quarter")
+                else:
+                    fundamental_warnings.append("⚠️ Future revenue estimates not consistently rising")
+            except:
+                pass
+
+    except Exception as e:
+        fundamental_warnings.append(f"⚠️ Could not fully calculate fundamentals: {str(e)[:50]}")
+
+    return max(0, min(fundamental_score, 100)), fundamental_signals, fundamental_warnings
 
 @st.cache_data(ttl=3600)
 def get_stock_data(ticker):
     try:
         df = yf.download(ticker, period="5y", auto_adjust=True, progress=False, threads=False)
         if df.empty or len(df) < 50:
-            t = yf.Ticker(ticker)
-            df = t.history(period="5y")
-        if df.empty or len(df) < 50:
-            return None
-        return df
+            df = yf.Ticker(ticker).history(period="5y")
+        return df if not df.empty and len(df) >= 50 else None
     except:
         return None
 
@@ -176,8 +252,8 @@ def get_fear_greed():
     except:
         try:
             r = requests.get("https://api.alternative.me/fng/")
-            data = r.json()["data"][0]
-            return int(data["value"]), data["value_classification"]
+            d = r.json()["data"][0]
+            return int(d["value"]), d["value_classification"]
         except:
             return None, None
 
@@ -200,8 +276,7 @@ def get_macro():
             close = df["Close"].squeeze()
             val = round(float(close.iloc[-1]), 2)
             prev = round(float(close.iloc[-2]), 2)
-            chg = round(val - prev, 2)
-            macro[name] = {"value": val, "change": chg}
+            macro[name] = {"value": val, "change": round(val - prev, 2)}
         except:
             macro[name] = {"value": "N/A", "change": 0}
     return macro
@@ -212,33 +287,33 @@ def get_fundamentals(ticker):
         stock = yf.Ticker(ticker)
         info = stock.info
         rec = stock.recommendations
-        strong_buy, buy, hold, sell, strong_sell = 0, 0, 0, 0, 0
+        strong_buy = buy = hold = sell = strong_sell = 0
         if rec is not None and not rec.empty:
             latest = rec.iloc[-1]
             strong_buy = int(latest.get("strongBuy", 0))
-            buy = int(latest.get("buy", 0))
-            hold = int(latest.get("hold", 0))
-            sell = int(latest.get("sell", 0))
-            strong_sell = int(latest.get("strongSell", 0))
-        target = info.get("targetMeanPrice", None)
-        current = info.get("currentPrice", None)
-        upside = round((target - current) / current * 100, 1) if target and current else None
+            buy        = int(latest.get("buy", 0))
+            hold       = int(latest.get("hold", 0))
+            sell       = int(latest.get("sell", 0))
+            strong_sell= int(latest.get("strongSell", 0))
+        target  = info.get("targetMeanPrice")
+        current = info.get("currentPrice")
+        upside  = round((target - current) / current * 100, 1) if target and current else None
         return {
             "strong_buy": strong_buy, "buy": buy, "hold": hold,
             "sell": sell, "strong_sell": strong_sell,
             "target": target, "upside": upside,
-            "rev_growth": info.get("revenueGrowth"),
-            "earnings_growth": info.get("earningsGrowth"),
-            "pe": info.get("trailingPE"),
-            "forward_pe": info.get("forwardPE"),
-            "profit_margin": info.get("profitMargins"),
-            "eps_forward": info.get("forwardEps"),
-            "eps_trailing": info.get("trailingEps"),
-            "market_cap": info.get("marketCap"),
-            "shares_outstanding": info.get("sharesOutstanding"),
-            "held_percent_institutions": info.get("heldPercentInstitutions"),
-            "held_percent_insiders": info.get("heldPercentInsiders"),
-            "float_shares": info.get("floatShares"),
+            "rev_growth":       info.get("revenueGrowth"),
+            "earnings_growth":  info.get("earningsGrowth"),
+            "pe":               info.get("trailingPE"),
+            "forward_pe":       info.get("forwardPE"),
+            "profit_margin":    info.get("profitMargins"),
+            "eps_forward":      info.get("forwardEps"),
+            "eps_trailing":     info.get("trailingEps"),
+            "market_cap":       info.get("marketCap"),
+            "shares_outstanding":         info.get("sharesOutstanding"),
+            "held_percent_institutions":  info.get("heldPercentInstitutions"),
+            "held_percent_insiders":      info.get("heldPercentInsiders"),
+            "float_shares":               info.get("floatShares"),
         }
     except:
         return {}
@@ -248,39 +323,18 @@ def get_institutional_holders(ticker):
     try:
         stock = yf.Ticker(ticker)
         holders_list = []
-        try:
-            inst = stock.institutional_holders
-            if inst is not None and not inst.empty:
-                inst = inst.head(10).copy()
-                cols_to_keep = []
-                for col in inst.columns:
-                    col_lower = str(col).lower()
-                    if any(k in col_lower for k in ["holder", "shares", "pct", "%", "value", "date"]):
-                        cols_to_keep.append(col)
-                if cols_to_keep:
-                    inst = inst[cols_to_keep]
-                inst["Type"] = "Institution"
-                holders_list.append(inst)
-        except:
-            pass
-        try:
-            mutual = stock.mutualfund_holders
-            if mutual is not None and not mutual.empty:
-                mutual = mutual.head(5).copy()
-                cols_to_keep = []
-                for col in mutual.columns:
-                    col_lower = str(col).lower()
-                    if any(k in col_lower for k in ["holder", "shares", "pct", "%", "value", "date"]):
-                        cols_to_keep.append(col)
-                if cols_to_keep:
-                    mutual = mutual[cols_to_keep]
-                mutual["Type"] = "Mutual Fund"
-                holders_list.append(mutual)
-        except:
-            pass
-        if holders_list:
-            return pd.concat(holders_list, ignore_index=True).head(15)
-        return None
+        for attr, label in [("institutional_holders", "Institution"), ("mutualfund_holders", "Mutual Fund")]:
+            try:
+                df = getattr(stock, attr)
+                if df is not None and not df.empty:
+                    df = df.head(10 if label == "Institution" else 5).copy()
+                    cols = [c for c in df.columns if any(k in str(c).lower() for k in ["holder","shares","pct","%","value","date"])]
+                    if cols: df = df[cols]
+                    df["Type"] = label
+                    holders_list.append(df)
+            except:
+                pass
+        return pd.concat(holders_list, ignore_index=True).head(15) if holders_list else None
     except:
         return None
 
@@ -289,13 +343,9 @@ def get_fmp_financials(ticker):
     if not FMP_API_KEY:
         return None, None
     try:
-        url = f"https://financialmodelingprep.com/api/v3/income-statement/{ticker}?limit=5&apikey={FMP_API_KEY}"
-        r = requests.get(url)
-        actuals = r.json()
-        url2 = f"https://financialmodelingprep.com/api/v3/analyst-estimates/{ticker}?limit=3&apikey={FMP_API_KEY}"
-        r2 = requests.get(url2)
-        estimates = r2.json()
-        return actuals, estimates
+        r1 = requests.get(f"https://financialmodelingprep.com/api/v3/income-statement/{ticker}?limit=5&apikey={FMP_API_KEY}")
+        r2 = requests.get(f"https://financialmodelingprep.com/api/v3/analyst-estimates/{ticker}?limit=3&apikey={FMP_API_KEY}")
+        return r1.json(), r2.json()
     except:
         return None, None
 
@@ -311,17 +361,13 @@ def get_stock_news(ticker):
 def detect_123_reversal(close):
     try:
         prices = close.values[-60:]
-        lows = []
-        for i in range(2, len(prices)-2):
-            if prices[i] < prices[i-1] and prices[i] < prices[i+1]:
-                lows.append((i, prices[i]))
+        lows = [(i, prices[i]) for i in range(2, len(prices)-2)
+                if prices[i] < prices[i-1] and prices[i] < prices[i+1]]
         if len(lows) >= 2:
             p1_idx, p1 = lows[-2]
             p3_idx, p3 = lows[-1]
-            if p3 > p1:
-                p2 = max(prices[p1_idx:p3_idx])
-                if prices[-1] > p2:
-                    return True
+            if p3 > p1 and prices[-1] > max(prices[p1_idx:p3_idx]):
+                return True
         return False
     except:
         return False
@@ -336,9 +382,8 @@ def get_support_resistance(close):
             if prices[i] > prices[i-1] and prices[i] > prices[i+1] and prices[i] > prices[i-2] and prices[i] > prices[i+2]:
                 resistances.append(round(float(prices[i]), 2))
         price_now = float(prices[-1])
-        supports = sorted([s for s in supports if s < price_now], reverse=True)[:3]
-        resistances = sorted([r for r in resistances if r > price_now])[:3]
-        return supports, resistances
+        return (sorted([s for s in supports if s < price_now], reverse=True)[:3],
+                sorted([r for r in resistances if r > price_now])[:3])
     except:
         return [], []
 
@@ -358,210 +403,176 @@ with st.spinner("Loading all stocks..."):
             progress.progress((i+1)/len(tickers))
             continue
         try:
-            close = df["Close"].squeeze()
-            vol = df["Volume"].squeeze()
+            close    = df["Close"].squeeze()
+            vol      = df["Volume"].squeeze()
             close_1y = close.iloc[-252:] if len(close) >= 252 else close
-            price = round(float(close.iloc[-1]), 2)
-            ma50 = round(float(close_1y.rolling(50).mean().iloc[-1]), 2)
-            ma150 = round(float(close_1y.rolling(150).mean().iloc[-1]), 2)
-            ma200 = round(float(close_1y.rolling(200).mean().iloc[-1]), 2)
-            high52 = round(float(close_1y.max()), 2)
-            low52 = round(float(close_1y.min()), 2)
-            pct_from_50 = round((price - ma50) / ma50 * 100, 1)
-            pct_from_200 = round((price - ma200) / ma200 * 100, 1)
-            pct_from_high = round((price - high52) / high52 * 100, 1)
-            ma50_slope = float(close_1y.rolling(50).mean().iloc[-1]) - float(close_1y.rolling(50).mean().iloc[-6])
-            ma200_slope = float(close_1y.rolling(200).mean().iloc[-1]) - float(close_1y.rolling(200).mean().iloc[-10])
-            stock_return = float(close_1y.iloc[-1]) / float(close_1y.iloc[0]) - 1
-            rs = round((stock_return - spy_return) * 100, 1)
-            reversal_123 = detect_123_reversal(close_1y)
-            rsi_series = calculate_rsi(close_1y).dropna()
-            current_rsi = round(float(rsi_series.iloc[-1]), 1) if not rsi_series.empty else 50
-            avg_vol_50 = float(vol.rolling(50).mean().iloc[-1])
-            volume_ratio = round(float(vol.iloc[-1]) / avg_vol_50, 2) if avg_vol_50 and avg_vol_50 > 0 else 0
+            price    = round(float(close.iloc[-1]), 2)
+            ma50     = round(float(close_1y.rolling(50).mean().iloc[-1]), 2)
+            ma150    = round(float(close_1y.rolling(150).mean().iloc[-1]), 2)
+            ma200    = round(float(close_1y.rolling(200).mean().iloc[-1]), 2)
+            high52   = round(float(close_1y.max()), 2)
+            low52    = round(float(close_1y.min()), 2)
+            pct_from_50   = round((price - ma50)  / ma50  * 100, 1)
+            pct_from_200  = round((price - ma200) / ma200 * 100, 1)
+            pct_from_high = round((price - high52)/ high52* 100, 1)
+            ma50_slope    = float(close_1y.rolling(50).mean().iloc[-1])  - float(close_1y.rolling(50).mean().iloc[-6])
+            ma200_slope   = float(close_1y.rolling(200).mean().iloc[-1]) - float(close_1y.rolling(200).mean().iloc[-10])
+            stock_return  = float(close_1y.iloc[-1]) / float(close_1y.iloc[0]) - 1
+            rs            = round((stock_return - spy_return) * 100, 1)
+            reversal_123  = detect_123_reversal(close_1y)
+            rsi_series    = calculate_rsi(close_1y).dropna()
+            current_rsi   = round(float(rsi_series.iloc[-1]), 1) if not rsi_series.empty else 50
+            avg_vol_50    = float(vol.rolling(50).mean().iloc[-1])
+            volume_ratio  = round(float(vol.iloc[-1]) / avg_vol_50, 2) if avg_vol_50 > 0 else 0
 
-            if current_rsi >= 80: rsi_status = "‼️ Extremely Overbought"
-            elif current_rsi >= 70: rsi_status = "⚠️ Overbought"
-            elif current_rsi <= 20: rsi_status = "‼️ Extremely Oversold"
-            elif current_rsi <= 30: rsi_status = "⚠️ Oversold"
-            else: rsi_status = "✅ Neutral"
+            if current_rsi >= 80:    rsi_status = "‼️ Extremely Overbought"
+            elif current_rsi >= 70:  rsi_status = "⚠️ Overbought"
+            elif current_rsi <= 20:  rsi_status = "‼️ Extremely Oversold"
+            elif current_rsi <= 30:  rsi_status = "⚠️ Oversold"
+            else:                    rsi_status = "✅ Neutral"
 
-            if volume_ratio >= 5: volume_status = "‼️ Climax Volume"
-            elif volume_ratio >= 3: volume_status = "⚠️ Very High Volume"
-            elif volume_ratio >= 1.5: volume_status = "✅ Above Average"
-            else: volume_status = "Normal"
+            if volume_ratio >= 5:    volume_status = "‼️ Climax Volume"
+            elif volume_ratio >= 3:  volume_status = "⚠️ Very High Volume"
+            elif volume_ratio >= 1.5:volume_status = "✅ Above Average"
+            else:                    volume_status = "Normal"
 
-            if pct_from_200 >= 50: extension_status = "‼️ Very Extended vs 200MA"
+            if pct_from_200 >= 50:   extension_status = "‼️ Very Extended vs 200MA"
             elif pct_from_200 >= 30: extension_status = "⚠️ Extended vs 200MA"
-            elif pct_from_200 <= -30: extension_status = "⚠️ Washed Out vs 200MA"
-            else: extension_status = "✅ Normal vs 200MA"
+            elif pct_from_200 <= -30:extension_status = "⚠️ Washed Out vs 200MA"
+            else:                    extension_status = "✅ Normal vs 200MA"
 
-            if pct_from_high >= -5: high_status = "Near 52W High"
+            if pct_from_high >= -5:    high_status = "Near 52W High"
             elif pct_from_high <= -40: high_status = "⚠️ Deeply Below 52W High"
-            else: high_status = "Normal"
+            else:                      high_status = "Normal"
 
-            fund = get_fundamentals(ticker)
-            rev_growth = fund.get("rev_growth")
+            fund            = get_fundamentals(ticker)
+            rev_growth      = fund.get("rev_growth")
             earnings_growth = fund.get("earnings_growth")
-            profit_margin = fund.get("profit_margin")
-            forward_pe = fund.get("forward_pe")
+            profit_margin   = fund.get("profit_margin")
+            forward_pe      = fund.get("forward_pe")
+
+            actuals, estimates = get_fmp_financials(ticker)
+            fundamental_score, fundamental_signals, fundamental_warnings = get_fundamental_score(actuals, estimates)
 
             score = 0
             scoring_breakdown = []
 
             if ma50 > ma150 > ma200 and price > ma50:
-                score += 15
-                scoring_breakdown.append(("Trend Template", 15, "50MA > 150MA > 200MA and price above 50MA"))
+                score += 15; scoring_breakdown.append(("Trend Template", 15, "50MA > 150MA > 200MA and price above 50MA"))
             else:
                 scoring_breakdown.append(("Trend Template", 0, "Trend template not fully confirmed"))
 
             if ma50_slope > 0 and ma200_slope > 0:
-                score += 10
-                scoring_breakdown.append(("MA Slope", 10, "50MA and 200MA are both rising"))
+                score += 10; scoring_breakdown.append(("MA Slope", 10, "50MA and 200MA are both rising"))
             else:
                 scoring_breakdown.append(("MA Slope", 0, "MA slopes not both rising"))
 
             if reversal_123:
-                score += 15
-                scoring_breakdown.append(("1-2-3 Reversal", 15, "1-2-3 reversal confirmed"))
+                score += 15; scoring_breakdown.append(("1-2-3 Reversal", 15, "1-2-3 reversal confirmed"))
             else:
                 scoring_breakdown.append(("1-2-3 Reversal", 0, "1-2-3 reversal not confirmed"))
 
             if rs > 20:
-                score += 15
-                scoring_breakdown.append(("Relative Strength", 15, "Outperforming SPY by >20%"))
+                score += 15; scoring_breakdown.append(("Relative Strength", 15, "Outperforming SPY by >20%"))
             elif rs > 10:
-                score += 10
-                scoring_breakdown.append(("Relative Strength", 10, "Outperforming SPY by >10%"))
+                score += 10; scoring_breakdown.append(("Relative Strength", 10, "Outperforming SPY by >10%"))
             elif rs > 0:
-                score += 5
-                scoring_breakdown.append(("Relative Strength", 5, "Outperforming SPY slightly"))
+                score += 5;  scoring_breakdown.append(("Relative Strength", 5,  "Outperforming SPY slightly"))
             else:
                 scoring_breakdown.append(("Relative Strength", 0, "Underperforming SPY"))
 
             if rev_growth and rev_growth > 0.20:
-                score += 10
-                scoring_breakdown.append(("Revenue Growth", 10, "Revenue growth above 20%"))
+                score += 10; scoring_breakdown.append(("Revenue Growth", 10, "Revenue growth above 20%"))
             elif rev_growth and rev_growth > 0.10:
-                score += 5
-                scoring_breakdown.append(("Revenue Growth", 5, "Revenue growth above 10%"))
+                score += 5;  scoring_breakdown.append(("Revenue Growth", 5,  "Revenue growth above 10%"))
             else:
                 scoring_breakdown.append(("Revenue Growth", 0, "Below threshold or unavailable"))
 
             if earnings_growth and earnings_growth > 0.20:
-                score += 10
-                scoring_breakdown.append(("Earnings Growth", 10, "Earnings growth above 20%"))
+                score += 10; scoring_breakdown.append(("Earnings Growth", 10, "Earnings growth above 20%"))
             elif earnings_growth and earnings_growth > 0.10:
-                score += 5
-                scoring_breakdown.append(("Earnings Growth", 5, "Earnings growth above 10%"))
+                score += 5;  scoring_breakdown.append(("Earnings Growth", 5,  "Earnings growth above 10%"))
             else:
                 scoring_breakdown.append(("Earnings Growth", 0, "Below threshold or unavailable"))
 
             if profit_margin and profit_margin > 0.10:
-                score += 5
-                scoring_breakdown.append(("Profit Margin", 5, "Profit margin above 10%"))
+                score += 5; scoring_breakdown.append(("Profit Margin", 5, "Profit margin above 10%"))
             else:
                 scoring_breakdown.append(("Profit Margin", 0, "Below 10% or unavailable"))
 
             if forward_pe and 0 < forward_pe < 25:
-                score += 10
-                scoring_breakdown.append(("Valuation", 10, "Forward PE below 25"))
+                score += 10; scoring_breakdown.append(("Valuation", 10, "Forward PE below 25"))
             elif forward_pe and 25 <= forward_pe < 40:
-                score += 5
-                scoring_breakdown.append(("Valuation", 5, "Forward PE between 25-40"))
+                score += 5;  scoring_breakdown.append(("Valuation", 5,  "Forward PE between 25-40"))
             else:
                 scoring_breakdown.append(("Valuation", 0, "PE too high or unavailable"))
 
             if 50 <= current_rsi <= 70:
-                score += 5
-                scoring_breakdown.append(("RSI Quality", 5, "RSI in healthy zone 50-70"))
+                score += 5;  scoring_breakdown.append(("RSI Quality", 5,   "RSI in healthy zone 50-70"))
             elif current_rsi >= 80:
-                score -= 10
-                scoring_breakdown.append(("RSI Warning", -10, "Extremely overbought RSI >= 80"))
+                score -= 10; scoring_breakdown.append(("RSI Warning", -10, "Extremely overbought RSI >= 80"))
             elif current_rsi >= 70:
-                score -= 5
-                scoring_breakdown.append(("RSI Warning", -5, "Overbought RSI >= 70"))
+                score -= 5;  scoring_breakdown.append(("RSI Warning", -5,  "Overbought RSI >= 70"))
             elif current_rsi <= 30:
-                score -= 5
-                scoring_breakdown.append(("RSI Warning", -5, "Oversold RSI <= 30"))
+                score -= 5;  scoring_breakdown.append(("RSI Warning", -5,  "Oversold RSI <= 30"))
             else:
                 scoring_breakdown.append(("RSI Quality", 0, "RSI neutral"))
 
             if pct_from_200 >= 50:
-                score -= 10
-                scoring_breakdown.append(("Extension Warning", -10, "Price >50% above 200MA"))
+                score -= 10; scoring_breakdown.append(("Extension Warning", -10, "Price >50% above 200MA"))
             elif pct_from_200 >= 30:
-                score -= 5
-                scoring_breakdown.append(("Extension Warning", -5, "Price >30% above 200MA"))
+                score -= 5;  scoring_breakdown.append(("Extension Warning", -5,  "Price >30% above 200MA"))
             else:
                 scoring_breakdown.append(("Extension Warning", 0, "Not excessively extended"))
 
-            if volume_ratio >= 1.5 and volume_ratio < 5:
-                score += 5
-                scoring_breakdown.append(("Volume", 5, "Volume above 1.5x average"))
+            if 1.5 <= volume_ratio < 5:
+                score += 5;  scoring_breakdown.append(("Volume", 5,  "Volume above 1.5x average"))
             elif volume_ratio >= 5:
-                score -= 5
-                scoring_breakdown.append(("Volume", -5, "Possible climax volume >5x"))
+                score -= 5;  scoring_breakdown.append(("Volume", -5, "Possible climax volume >5x"))
             else:
                 scoring_breakdown.append(("Volume", 0, "Normal volume"))
 
             if fg_score and fg_score >= 75:
-                score -= 5
-                scoring_breakdown.append(("Market Sentiment", -5, "Fear & Greed is high"))
+                score -= 5; scoring_breakdown.append(("Market Sentiment", -5, "Fear & Greed is high"))
             else:
                 scoring_breakdown.append(("Market Sentiment", 0, "No sentiment penalty"))
 
             score = max(0, min(score, 100))
 
             row_data = {
-                "_price_raw": price,
-                "_rs_raw": rs,
-                "_rev_growth_raw": rev_growth,
-                "_rsi_raw": current_rsi,
-                "_ma50_slope": ma50_slope,
-                "_ma200_slope": ma200_slope,
+                "_price_raw": price, "_rs_raw": rs, "_rev_growth_raw": rev_growth,
+                "_rsi_raw": current_rsi, "_ma50_slope": ma50_slope, "_ma200_slope": ma200_slope,
             }
-            buy_score, buy_signals = get_buy_score(row_data, fund)
-            sell_score, sell_signals = get_sell_score(row_data, fund)
+            buy_score,  buy_signals  = get_buy_score(row_data, fund, fundamental_score)
+            risk_score, risk_signals = get_risk_score(row_data, fund, fundamental_score)
+            net_score = buy_score - risk_score
+            verdict   = get_verdict(score, buy_score, risk_score)
 
             results.append({
-                "Ticker": ticker,
-                "Price": f"${price:.2f}",
-                "Score": score,
-                "Label": get_label(score),
+                "Ticker": ticker, "Price": f"${price:.2f}", "Score": score,
+                "Label": get_label(score), "Verdict": verdict,
                 "Mkt Cap": fmt_cap(fund.get("market_cap")),
-                "RSI": current_rsi,
-                "RSI Status": rsi_status,
-                "Vol Ratio": volume_ratio,
-                "Vol Status": volume_status,
-                "Extension": extension_status,
-                "52W Status": high_status,
-                "50MA": f"${ma50:.2f}",
-                "200MA": f"${ma200:.2f}",
-                "52W High": f"${high52:.2f}",
-                "52W Low": f"${low52:.2f}",
-                "vs 50MA": f"{pct_from_50}%",
-                "vs 200MA": f"{pct_from_200}%",
-                "vs 52W High": f"{pct_from_high}%",
-                "RS vs SPY": f"{rs}%",
+                "RSI": current_rsi, "RSI Status": rsi_status,
+                "Vol Ratio": volume_ratio, "Vol Status": volume_status,
+                "Extension": extension_status, "52W Status": high_status,
+                "50MA": f"${ma50:.2f}", "200MA": f"${ma200:.2f}",
+                "52W High": f"${high52:.2f}", "52W Low": f"${low52:.2f}",
+                "vs 50MA": f"{pct_from_50}%", "vs 200MA": f"{pct_from_200}%",
+                "vs 52W High": f"{pct_from_high}%", "RS vs SPY": f"{rs}%",
                 "123 Rev": "✅" if reversal_123 else "❌",
-                "Buy Score": buy_score,
-                "Buy Label": get_buy_label(buy_score),
-                "Sell Score": sell_score,
-                "Sell Label": get_sell_label(sell_score),
-                "_price_raw": price,
-                "_rs_raw": rs,
-                "_rev_growth_raw": rev_growth,
-                "_rsi_raw": current_rsi,
-                "_ma50_slope": ma50_slope,
-                "_ma200_slope": ma200_slope,
-                "_fund": fund,
-                "_scoring_breakdown": scoring_breakdown,
-                "_buy_signals": buy_signals,
-                "_sell_signals": sell_signals,
+                "Buy Setup": buy_score,  "Buy Label": get_buy_label(buy_score),
+                "Risk Score": risk_score,"Risk Label": get_risk_label(risk_score),
+                "Net Score": net_score,  "Fund Score": fundamental_score,
+                "_price_raw": price, "_rs_raw": rs, "_rev_growth_raw": rev_growth,
+                "_rsi_raw": current_rsi, "_ma50_slope": ma50_slope, "_ma200_slope": ma200_slope,
+                "_fund": fund, "_scoring_breakdown": scoring_breakdown,
+                "_buy_signals": buy_signals, "_risk_signals": risk_signals,
+                "_fundamental_signals": fundamental_signals,
+                "_fundamental_warnings": fundamental_warnings,
+                "_actuals": actuals, "_estimates": estimates,
             })
             stock_data[ticker] = df
-        except Exception as e:
+        except:
             skipped.append(ticker)
         progress.progress((i+1)/len(tickers))
     progress.empty()
@@ -576,45 +587,45 @@ if skipped:
     st.warning(f"Could not load: {', '.join(skipped)}")
 
 tab0, tab1, tab_buy, tab_sell, tab2, tab3, tab4, tab5 = st.tabs([
-    "⚡ Quick Scan",
-    "📊 Scanner",
-    "🟢 Buying Signals",
-    "🔴 Selling Signals",
-    "🔎 Analysis",
-    "💰 Revenue & EPS",
-    "🌍 Macro",
-    "📰 News"
+    "⚡ Quick Scan", "📊 Scanner", "🟢 Buying Signals",
+    "🔴 Risk Warnings", "🔎 Analysis", "📑 Fundamentals", "🌍 Macro", "📰 News"
 ])
 
 with tab0:
     st.markdown("### ⚡ Quick Scan — Daily Watchlist")
-    st.caption("Score ≥ 80 | RSI 50–75 | Rev Growth > 10% | RS vs SPY > 10%")
-
+    st.caption("Score ≥ 80 | Buy Setup ≥ 70 | Risk < 40 | RSI 50–70 | Rev Growth > 10% | RS vs SPY > 10%")
     quick = df_results[
         (df_results["Score"] >= 80) &
+        (df_results["Buy Setup"] >= 70) &
+        (df_results["Risk Score"] < 40) &
         (df_results["_rsi_raw"] >= 50) &
-        (df_results["_rsi_raw"] <= 75) &
+        (df_results["_rsi_raw"] <= 70) &
         (df_results["_rs_raw"] > 10) &
         (df_results["_rev_growth_raw"].apply(lambda x: x > 0.10 if x else False))
-    ].sort_values("Score", ascending=False)
+    ].sort_values("Net Score", ascending=False)
 
     if quick.empty:
         st.info("No stocks meet all Quick Scan criteria today. Check the full Scanner tab.")
     else:
         st.success(f"✅ {len(quick)} stocks meet all criteria today!")
         for _, qrow in quick.iterrows():
-            with st.expander(f"{qrow['Ticker']} — {qrow['Label']} — Score {qrow['Score']}"):
+            with st.expander(f"{qrow['Ticker']} — {qrow['Verdict']} — Score {qrow['Score']} | Net {qrow['Net Score']}"):
                 q1, q2, q3, q4 = st.columns(4)
                 q1.metric("Price", qrow["Price"])
-                q2.metric("RSI", qrow["RSI"])
-                q3.metric("RS vs SPY", qrow["RS vs SPY"])
-                q4.metric("Mkt Cap", qrow["Mkt Cap"])
+                q2.metric("Buy Setup", f"{qrow['Buy Setup']}/100")
+                q3.metric("Risk Score", f"{qrow['Risk Score']}/100")
+                q4.metric("Fund Score", qrow["Fund Score"])
+                q5, q6, q7, q8 = st.columns(4)
+                q5.metric("RSI", qrow["RSI"])
+                q6.metric("RS vs SPY", qrow["RS vs SPY"])
+                q7.metric("Net Score", qrow["Net Score"])
+                q8.metric("Mkt Cap", qrow["Mkt Cap"])
                 qf = qrow["_fund"]
                 if qf:
                     qf1, qf2, qf3 = st.columns(3)
                     qf1.metric("Rev Growth", f"{round(qf['rev_growth']*100,1)}%" if qf.get('rev_growth') else "N/A")
-                    qf2.metric("Target", f"${qf['target']:.2f}" if qf.get('target') else "N/A")
-                    qf3.metric("Upside", f"{qf['upside']}%" if qf.get('upside') else "N/A")
+                    qf2.metric("Target",     f"${qf['target']:.2f}"              if qf.get('target')     else "N/A")
+                    qf3.metric("Upside",     f"{qf['upside']}%"                  if qf.get('upside')     else "N/A")
 
 with tab1:
     def color_score(val):
@@ -624,216 +635,191 @@ with tab1:
         elif val >= 50: return "background-color: #5c5c1a; color: white"
         else: return "background-color: #3d0000; color: white"
 
-    display_cols = ["Ticker","Price","Mkt Cap","Score","Label","Buy Score","Buy Label","Sell Score","Sell Label","RSI","RSI Status","50MA","200MA","vs 50MA","vs 200MA","vs 52W High","RS vs SPY","123 Rev","Vol Ratio","Vol Status","Extension","52W Status"]
-    styled = df_results[display_cols].style.map(color_score, subset=["Score"])
-    st.dataframe(styled, use_container_width=True, height=500)
+    display_cols = [
+        "Ticker","Price","Mkt Cap","Score","Label","Verdict",
+        "Buy Setup","Buy Label","Risk Score","Risk Label","Net Score","Fund Score",
+        "RSI","RSI Status","50MA","200MA","vs 50MA","vs 200MA","vs 52W High",
+        "RS vs SPY","123 Rev","Vol Ratio","Vol Status","Extension","52W Status"
+    ]
+    st.dataframe(df_results[display_cols].style.map(color_score, subset=["Score"]), use_container_width=True, height=500)
 
     c1, c2, c3, c4, c5 = st.columns(5)
-    c1.metric("🟢 Elite", len(df_results[df_results["Score"] >= 90]))
-    c2.metric("🟩 Strong", len(df_results[(df_results["Score"] >= 80) & (df_results["Score"] < 90)]))
+    c1.metric("🟢 Elite",     len(df_results[df_results["Score"] >= 90]))
+    c2.metric("🟩 Strong",    len(df_results[(df_results["Score"] >= 80) & (df_results["Score"] < 90)]))
     c3.metric("🟨 Watchlist", len(df_results[(df_results["Score"] >= 65) & (df_results["Score"] < 80)]))
-    c4.metric("🟧 Early", len(df_results[(df_results["Score"] >= 50) & (df_results["Score"] < 65)]))
-    c5.metric("🔴 Ignore", len(df_results[df_results["Score"] < 50]))
+    c4.metric("🟧 Early",     len(df_results[(df_results["Score"] >= 50) & (df_results["Score"] < 65)]))
+    c5.metric("🔴 Ignore",    len(df_results[df_results["Score"] < 50]))
 
 with tab_buy:
     st.markdown("### 🟢 Buying Signals")
-    st.caption("Stocks showing possible buy setups — Buy Score ≥ 60")
-    buy_df = df_results[df_results["Buy Score"] >= 60].sort_values("Buy Score", ascending=False)
+    st.caption("Stocks showing possible buy setups — sorted by Net Score (Buy Setup minus Risk)")
+    buy_df = df_results[df_results["Buy Setup"] >= 60].sort_values("Net Score", ascending=False)
     if buy_df.empty:
         st.info("No strong buying setups today.")
     else:
         st.success(f"✅ {len(buy_df)} stocks with possible buy setups")
         for _, brow in buy_df.iterrows():
-            with st.expander(f"{brow['Ticker']} — {brow['Buy Label']} — Buy Score {brow['Buy Score']}"):
-                b1, b2, b3, b4 = st.columns(4)
-                b1.metric("Price", brow["Price"])
+            with st.expander(f"{brow['Ticker']} — {brow['Buy Label']} — Net {brow['Net Score']} (Buy {brow['Buy Setup']} / Risk {brow['Risk Score']})"):
+                b1, b2, b3, b4, b5 = st.columns(5)
+                b1.metric("Price",         brow["Price"])
                 b2.metric("Overall Score", f"{brow['Score']}/100")
-                b3.metric("Buy Score", f"{brow['Buy Score']}/100")
-                b4.metric("RS vs SPY", brow["RS vs SPY"])
+                b3.metric("Buy Setup",     f"{brow['Buy Setup']}/100")
+                b4.metric("Risk Score",    f"{brow['Risk Score']}/100")
+                b5.metric("Net Score",     brow["Net Score"])
                 st.markdown("**Buy Setup Signals:**")
                 for sig in brow["_buy_signals"]:
                     st.markdown(f"  {sig}")
 
 with tab_sell:
-    st.markdown("### 🔴 Selling Signals")
-    st.caption("Stocks showing possible sell/risk warnings — Sell Score ≥ 60")
-    sell_df = df_results[df_results["Sell Score"] >= 60].sort_values("Sell Score", ascending=False)
-    if sell_df.empty:
-        st.info("No major sell warnings today.")
+    st.markdown("### 🔴 Risk Warnings")
+    st.caption("Stocks showing possible sell/risk warnings — Risk Score ≥ 60")
+    risk_df = df_results[df_results["Risk Score"] >= 60].sort_values("Risk Score", ascending=False)
+    if risk_df.empty:
+        st.info("No major risk warnings today.")
     else:
-        st.warning(f"⚠️ {len(sell_df)} stocks with possible risk warnings")
-        for _, srow in sell_df.iterrows():
-            with st.expander(f"{srow['Ticker']} — {srow['Sell Label']} — Sell Score {srow['Sell Score']}"):
-                s1, s2, s3, s4 = st.columns(4)
-                s1.metric("Price", srow["Price"])
+        st.warning(f"⚠️ {len(risk_df)} stocks with possible risk warnings")
+        for _, srow in risk_df.iterrows():
+            with st.expander(f"{srow['Ticker']} — {srow['Risk Label']} — Risk {srow['Risk Score']}"):
+                s1, s2, s3, s4, s5 = st.columns(5)
+                s1.metric("Price",         srow["Price"])
                 s2.metric("Overall Score", f"{srow['Score']}/100")
-                s3.metric("Sell Score", f"{srow['Sell Score']}/100")
-                s4.metric("RSI", srow["RSI"])
+                s3.metric("Risk Score",    f"{srow['Risk Score']}/100")
+                s4.metric("RSI",           srow["RSI"])
+                s5.metric("Net Score",     srow["Net Score"])
                 st.markdown("**Risk Warning Signals:**")
-                for sig in srow["_sell_signals"]:
+                for sig in srow["_risk_signals"]:
                     st.markdown(f"  {sig}")
 
 with tab2:
     selected = st.selectbox("🔍 Search stock", df_results["Ticker"].tolist())
-    row = df_results[df_results["Ticker"] == selected].iloc[0]
+    row  = df_results[df_results["Ticker"] == selected].iloc[0]
     fund = row["_fund"]
     supports, resistances = get_support_resistance(stock_data[selected]["Close"].squeeze().iloc[-252:])
 
-    # 1. Executive Summary
     st.markdown("### 📋 Executive Summary")
     warnings = []
     if "Overbought" in row["RSI Status"]: warnings.append(row["RSI Status"])
-    if "Oversold" in row["RSI Status"]: warnings.append(row["RSI Status"])
-    if "Extended" in row["Extension"]: warnings.append(row["Extension"])
-    if "Climax" in row["Vol Status"]: warnings.append(row["Vol Status"])
-    if warnings:
-        st.warning(" | ".join(warnings))
-    else:
-        st.success("✅ No major warnings")
+    if "Oversold"   in row["RSI Status"]: warnings.append(row["RSI Status"])
+    if "Extended"   in row["Extension"]:  warnings.append(row["Extension"])
+    if "Climax"     in row["Vol Status"]: warnings.append(row["Vol Status"])
+    st.warning(" | ".join(warnings)) if warnings else st.success("✅ No major warnings")
 
-    st.markdown(f"#### {selected} — {row['Label']}")
-    e1, e2, e3, e4 = st.columns(4)
-    e1.metric("Price", row["Price"])
-    e2.metric("Overall Score", f"{int(row['Score'])}/100")
-    e3.metric("Mkt Cap", row["Mkt Cap"])
-    e4.metric("Label", row["Label"])
+    st.markdown(f"#### {selected} — {row['Verdict']}")
+    e1,e2,e3,e4 = st.columns(4)
+    e1.metric("Price", row["Price"]); e2.metric("Overall Score", f"{int(row['Score'])}/100")
+    e3.metric("Mkt Cap", row["Mkt Cap"]); e4.metric("Verdict", row["Verdict"])
 
-    e5, e6, e7, e8 = st.columns(4)
-    e5.metric("🟢 Buy Score", f"{row['Buy Score']}/100")
-    e6.metric("Buy Setup", row["Buy Label"])
-    e7.metric("🔴 Sell Score", f"{row['Sell Score']}/100")
-    e8.metric("Sell Warning", row["Sell Label"])
+    e5,e6,e7,e8 = st.columns(4)
+    e5.metric("🟢 Buy Setup",   f"{row['Buy Setup']}/100");  e6.metric("Buy Label",  row["Buy Label"])
+    e7.metric("🔴 Risk Score",  f"{row['Risk Score']}/100"); e8.metric("Risk Label", row["Risk Label"])
 
+    e9,e10,e11,e12 = st.columns(4)
+    e9.metric("Net Score", row["Net Score"]); e10.metric("Fund Score", row["Fund Score"])
     if fund:
-        e9, e10, e11, e12 = st.columns(4)
-        e9.metric("🎯 Target", f"${fund['target']:.2f}" if fund.get('target') else "N/A")
-        e10.metric("📈 Upside", f"{fund['upside']}%" if fund.get('upside') else "N/A")
-        e11.metric("💚 Str Buy", fund.get('strong_buy', 0))
-        e12.metric("🟢 Buy", fund.get('buy', 0))
+        e11.metric("🎯 Target", f"${fund['target']:.2f}" if fund.get('target') else "N/A")
+        e12.metric("📈 Upside", f"{fund['upside']}%"     if fund.get('upside') else "N/A")
 
     st.markdown("---")
-
-    # 2. Signal Summary
     st.markdown("### 📡 Signal Summary")
-    sig_col1, sig_col2 = st.columns(2)
-    with sig_col1:
+    sc1, sc2 = st.columns(2)
+    with sc1:
         st.markdown("#### ✅ Buy Setup Signals")
-        if row["_buy_signals"]:
-            for sig in row["_buy_signals"]:
-                st.markdown(f"""
-                <div style="background:#166534;color:#FFFFFF;padding:8px 12px;border-radius:6px;margin-bottom:4px;font-size:0.9rem;">
-                    {sig}
-                </div>""", unsafe_allow_html=True)
-        else:
-            st.info("No active buy setup signals")
-
-    with sig_col2:
+        for sig in row["_buy_signals"]:
+            st.markdown(f'<div style="background:#166534;color:#FFF;padding:8px 12px;border-radius:6px;margin-bottom:4px;">{sig}</div>', unsafe_allow_html=True)
+        if not row["_buy_signals"]: st.info("No active buy setup signals")
+    with sc2:
         st.markdown("#### ⚠️ Risk Warning Signals")
-        if row["_sell_signals"]:
-            for sig in row["_sell_signals"]:
-                st.markdown(f"""
-                <div style="background:#991B1B;color:#FFFFFF;padding:8px 12px;border-radius:6px;margin-bottom:4px;font-size:0.9rem;">
-                    {sig}
-                </div>""", unsafe_allow_html=True)
-        else:
-            st.success("No active risk warning signals")
+        for sig in row["_risk_signals"]:
+            st.markdown(f'<div style="background:#991B1B;color:#FFF;padding:8px 12px;border-radius:6px;margin-bottom:4px;">{sig}</div>', unsafe_allow_html=True)
+        if not row["_risk_signals"]: st.success("No active risk warning signals")
 
     st.markdown("---")
-
-    # 3. Technical Analysis
     st.markdown("### 📊 Technical Analysis")
-    t1, t2, t3, t4 = st.columns(4)
-    t1.metric("RSI", row["RSI"])
-    t2.metric("RSI Status", row["RSI Status"])
-    t3.metric("Vol Ratio", row["Vol Ratio"])
-    t4.metric("Vol Status", row["Vol Status"])
-
-    t5, t6, t7, t8 = st.columns(4)
-    t5.metric("vs 50MA", row["vs 50MA"])
-    t6.metric("vs 200MA", row["vs 200MA"])
-    t7.metric("RS vs SPY", row["RS vs SPY"])
-    t8.metric("Extension", row["Extension"])
-
-    t9, t10, t11, t12 = st.columns(4)
-    t9.metric("52W High", row["52W High"])
-    t10.metric("vs 52W High", row["vs 52W High"])
-    t11.metric("52W Low", row["52W Low"])
-    t12.metric("52W Status", row["52W Status"])
-
+    t1,t2,t3,t4 = st.columns(4)
+    t1.metric("RSI", row["RSI"]); t2.metric("RSI Status", row["RSI Status"])
+    t3.metric("Vol Ratio", row["Vol Ratio"]); t4.metric("Vol Status", row["Vol Status"])
+    t5,t6,t7,t8 = st.columns(4)
+    t5.metric("vs 50MA", row["vs 50MA"]); t6.metric("vs 200MA", row["vs 200MA"])
+    t7.metric("RS vs SPY", row["RS vs SPY"]); t8.metric("Extension", row["Extension"])
+    t9,t10,t11,t12 = st.columns(4)
+    t9.metric("52W High", row["52W High"]); t10.metric("vs 52W High", row["vs 52W High"])
+    t11.metric("52W Low", row["52W Low"]); t12.metric("52W Status", row["52W Status"])
     if fund:
         st.markdown("---")
-        f1, f2, f3, f4 = st.columns(4)
+        f1,f2,f3,f4 = st.columns(4)
         f1.metric("💰 Rev Growth", f"{round(fund['rev_growth']*100,1)}%" if fund.get('rev_growth') else "N/A")
-        f2.metric("📉 Fwd PE", f"{round(fund['forward_pe'],1)}" if fund.get('forward_pe') else "N/A")
-        f3.metric("💵 Margin", f"{round(fund['profit_margin']*100,1)}%" if fund.get('profit_margin') else "N/A")
-        f4.metric("🟡 Hold", fund.get('hold', 0))
+        f2.metric("📉 Fwd PE",     f"{round(fund['forward_pe'],1)}"      if fund.get('forward_pe') else "N/A")
+        f3.metric("💵 Margin",     f"{round(fund['profit_margin']*100,1)}%" if fund.get('profit_margin') else "N/A")
+        f4.metric("💚 Str Buy",    fund.get('strong_buy', 0))
 
     st.markdown("---")
+    st.markdown("### 📑 Fundamental Quality")
+    fq1,fq2,fq3,fq4 = st.columns(4)
+    fq1.metric("Fund Score", f"{row['Fund Score']}/100")
+    fq2.metric("Str Buy", fund.get('strong_buy',0) if fund else "N/A")
+    fq3.metric("Buy",     fund.get('buy',0)        if fund else "N/A")
+    fq4.metric("Hold",    fund.get('hold',0)       if fund else "N/A")
 
-    # 4. Score Breakdown
+    fqc1, fqc2 = st.columns(2)
+    with fqc1:
+        st.markdown("#### ✅ Fundamental Strengths")
+        for sig in row["_fundamental_signals"]:
+            st.markdown(f'<div style="background:#166534;color:#FFF;padding:8px 12px;border-radius:6px;margin-bottom:4px;">{sig}</div>', unsafe_allow_html=True)
+        if not row["_fundamental_signals"]: st.info("No signals — add FMP_API_KEY for full analysis")
+    with fqc2:
+        st.markdown("#### ⚠️ Fundamental Warnings")
+        for warn in row["_fundamental_warnings"]:
+            st.markdown(f'<div style="background:#991B1B;color:#FFF;padding:8px 12px;border-radius:6px;margin-bottom:4px;">{warn}</div>', unsafe_allow_html=True)
+        if not row["_fundamental_warnings"]: st.success("No fundamental warnings")
+
+    st.markdown("---")
     st.markdown("### 🧮 Score Breakdown")
-    breakdown_df = pd.DataFrame(row["_scoring_breakdown"], columns=["Category", "Points", "Reason"])
-    positive_points = breakdown_df[breakdown_df["Points"] > 0]["Points"].sum()
-    negative_points = breakdown_df[breakdown_df["Points"] < 0]["Points"].sum()
-
-    b1, b2, b3 = st.columns(3)
-    b1.metric("✅ Positive Points", int(positive_points))
-    b2.metric("❌ Penalties", int(negative_points))
+    breakdown_df = pd.DataFrame(row["_scoring_breakdown"], columns=["Category","Points","Reason"])
+    pos = int(breakdown_df[breakdown_df["Points"] > 0]["Points"].sum())
+    neg = int(breakdown_df[breakdown_df["Points"] < 0]["Points"].sum())
+    b1,b2,b3 = st.columns(3)
+    b1.metric("✅ Positive Points", pos)
+    b2.metric("❌ Penalties", neg)
     b3.metric("🎯 Final Score", f"{int(row['Score'])}/100")
-
     for _, brow in breakdown_df.iterrows():
-        pts = brow["Points"]
-        if pts > 0:
-            bg_color = "#166534"
-            icon = "✅"
-        elif pts < 0:
-            bg_color = "#991B1B"
-            icon = "❌"
-        else:
-            bg_color = "#374151"
-            icon = "➖"
+        pts  = brow["Points"]
+        bg   = "#166534" if pts > 0 else "#991B1B" if pts < 0 else "#374151"
+        icon = "✅" if pts > 0 else "❌" if pts < 0 else "➖"
         st.markdown(f"""
-        <div style="background:{bg_color};color:#FFFFFF;padding:10px 14px;border-radius:8px;margin-bottom:4px;font-weight:600;display:flex;justify-content:space-between;align-items:center;">
-            <span>{icon} {brow['Category']}</span>
-            <span>{'+' if pts > 0 else ''}{pts}</span>
+        <div style="background:{bg};color:#FFF;padding:10px 14px;border-radius:8px;margin-bottom:4px;font-weight:600;display:flex;justify-content:space-between;">
+            <span>{icon} {brow['Category']}</span><span>{'+' if pts>0 else ''}{pts}</span>
         </div>
         <div style="padding:2px 14px 10px;color:#9CA3AF;font-size:0.8rem;">{brow['Reason']}</div>
         """, unsafe_allow_html=True)
 
     st.markdown("---")
-
-    # 5. Chart Levels
     st.markdown("### 📌 Chart Levels")
-    df = stock_data[selected]
-    close = df["Close"].squeeze()
-    vol = df["Volume"].squeeze()
+    df_sel    = stock_data[selected]
+    close_sel = df_sel["Close"].squeeze()
+    vol_sel   = df_sel["Volume"].squeeze()
 
-    lvl1, lvl2, lvl3, lvl4 = st.columns(4)
+    lvl1,lvl2,lvl3,lvl4 = st.columns(4)
     lvl1.metric("Current Price", row["Price"])
-    lvl2.metric("Target", f"${fund['target']:.2f}" if fund and fund.get("target") else "N/A")
-    lvl3.metric("Support 1", f"${supports[0]}" if len(supports) > 0 else "N/A")
-    lvl4.metric("Resistance 1", f"${resistances[0]}" if len(resistances) > 0 else "N/A")
+    lvl2.metric("Target",        f"${fund['target']:.2f}" if fund and fund.get("target") else "N/A")
+    lvl3.metric("Support 1",     f"${supports[0]}"    if len(supports) > 0 else "N/A")
+    lvl4.metric("Resistance 1",  f"${resistances[0]}" if len(resistances) > 0 else "N/A")
 
-    lvl5, lvl6, lvl7, lvl8 = st.columns(4)
-    lvl5.metric("Support 2", f"${supports[1]}" if len(supports) > 1 else "N/A")
-    lvl6.metric("Support 3", f"${supports[2]}" if len(supports) > 2 else "N/A")
+    lvl5,lvl6,lvl7,lvl8 = st.columns(4)
+    lvl5.metric("Support 2",    f"${supports[1]}"    if len(supports) > 1 else "N/A")
+    lvl6.metric("Support 3",    f"${supports[2]}"    if len(supports) > 2 else "N/A")
     lvl7.metric("Resistance 2", f"${resistances[1]}" if len(resistances) > 1 else "N/A")
     lvl8.metric("Resistance 3", f"${resistances[2]}" if len(resistances) > 2 else "N/A")
 
-    vol_cols = st.columns(3)
-    latest_volume = int(vol.iloc[-1])
-    avg_volume_50 = int(vol.rolling(50).mean().iloc[-1])
-    vol_cols[0].metric("Volume Ratio", row["Vol Ratio"])
-    vol_cols[1].metric("Latest Volume", f"{latest_volume:,}")
-    vol_cols[2].metric("50D Avg Volume", f"{avg_volume_50:,}")
+    vc1,vc2,vc3 = st.columns(3)
+    vc1.metric("Volume Ratio",   row["Vol Ratio"])
+    vc2.metric("Latest Volume",  f"{int(vol_sel.iloc[-1]):,}")
+    vc3.metric("50D Avg Volume", f"{int(vol_sel.rolling(50).mean().iloc[-1]):,}")
 
     st.markdown("---")
-
-    # 6. Interactive Chart
     st.markdown("### 📈 Interactive Chart")
-    show_sr = st.checkbox("Show Support/Resistance", value=True)
-    show_target = st.checkbox("Show Analyst Target", value=True)
-    show_volume = st.checkbox("Show Volume", value=True)
+    show_sr     = st.checkbox("Show Support/Resistance", value=True)
+    show_target = st.checkbox("Show Analyst Target",     value=True)
+    show_volume = st.checkbox("Show Volume",             value=True)
 
     try:
         timeframe = st.segmented_control("Timeframe", ["1M","3M","6M","YTD","1Y","5Y"], default="1Y")
@@ -841,109 +827,81 @@ with tab2:
         timeframe = st.radio("Timeframe", ["1M","3M","6M","YTD","1Y","5Y"], horizontal=True, index=4)
 
     now = pd.Timestamp.now()
-    if timeframe == "1M": df_plot = df[df.index >= now - pd.DateOffset(months=1)]
-    elif timeframe == "3M": df_plot = df[df.index >= now - pd.DateOffset(months=3)]
-    elif timeframe == "6M": df_plot = df[df.index >= now - pd.DateOffset(months=6)]
-    elif timeframe == "YTD": df_plot = df[df.index >= pd.Timestamp(now.year, 1, 1)]
-    elif timeframe == "1Y": df_plot = df[df.index >= now - pd.DateOffset(years=1)]
-    else: df_plot = df
+    if timeframe == "1M":   df_plot = df_sel[df_sel.index >= now - pd.DateOffset(months=1)]
+    elif timeframe == "3M": df_plot = df_sel[df_sel.index >= now - pd.DateOffset(months=3)]
+    elif timeframe == "6M": df_plot = df_sel[df_sel.index >= now - pd.DateOffset(months=6)]
+    elif timeframe == "YTD":df_plot = df_sel[df_sel.index >= pd.Timestamp(now.year, 1, 1)]
+    elif timeframe == "1Y": df_plot = df_sel[df_sel.index >= now - pd.DateOffset(years=1)]
+    else:                   df_plot = df_sel
 
     close_plot = df_plot["Close"].squeeze()
-    vol_plot = df_plot["Volume"].squeeze()
-    chart_supports = supports[:2]
+    vol_plot   = df_plot["Volume"].squeeze()
+    chart_supports    = supports[:2]
     chart_resistances = resistances[:2]
 
-    rows_count = 2 if show_volume else 1
-    row_heights = [0.78, 0.22] if show_volume else [1.0]
-
-    fig = make_subplots(rows=rows_count, cols=1, shared_xaxes=True, row_heights=row_heights, vertical_spacing=0.01)
+    rows_n = 2 if show_volume else 1
+    r_hts  = [0.78, 0.22] if show_volume else [1.0]
+    fig = make_subplots(rows=rows_n, cols=1, shared_xaxes=True, row_heights=r_hts, vertical_spacing=0.01)
     fig.add_trace(go.Scatter(x=df_plot.index, y=close_plot, name="Price", line=dict(color="white", width=2)), row=1, col=1)
-    fig.add_trace(go.Scatter(x=df_plot.index, y=close_plot.rolling(50).mean(), name="50MA", line=dict(color="dodgerblue", width=1.5)), row=1, col=1)
-    fig.add_trace(go.Scatter(x=df_plot.index, y=close_plot.rolling(200).mean(), name="200MA", line=dict(color="red", width=1.5)), row=1, col=1)
+    fig.add_trace(go.Scatter(x=df_plot.index, y=close_plot.rolling(50).mean(),  name="50MA",  line=dict(color="dodgerblue", width=1.5)), row=1, col=1)
+    fig.add_trace(go.Scatter(x=df_plot.index, y=close_plot.rolling(200).mean(), name="200MA", line=dict(color="red",        width=1.5)), row=1, col=1)
 
     if show_volume:
-        colors = ["lime" if i == 0 or float(vol_plot.iloc[i]) >= float(vol_plot.iloc[i-1]) else "red" for i in range(len(vol_plot))]
-        fig.add_trace(go.Bar(x=df_plot.index, y=vol_plot, name="Volume", marker_color=colors, opacity=0.4), row=2, col=1)
+        clrs = ["lime" if i==0 or float(vol_plot.iloc[i])>=float(vol_plot.iloc[i-1]) else "red" for i in range(len(vol_plot))]
+        fig.add_trace(go.Bar(x=df_plot.index, y=vol_plot, name="Volume", marker_color=clrs, opacity=0.4), row=2, col=1)
 
     label_x = df_plot.index[-1]
-
     if show_sr:
-        used_y_positions = []
+        used_s = []
         for i, s in enumerate(chart_supports):
-            adj_y = float(s)
-            for used_y in used_y_positions:
-                if abs(adj_y - used_y) / max(abs(used_y), 0.001) < 0.015:
-                    adj_y = adj_y * (1 - 0.015 * (i + 1))
-            used_y_positions.append(adj_y)
+            adj = float(s)
+            for uy in used_s:
+                if abs(adj-uy)/max(abs(uy),0.001) < 0.015: adj *= (1-0.015*(i+1))
+            used_s.append(adj)
             fig.add_hline(y=float(s), line_dash="dash", line_color="lime", opacity=0.35, row=1, col=1)
-            fig.add_annotation(
-                x=label_x, y=adj_y,
-                text=f"S{i+1}: ${s}",
-                showarrow=False, xanchor="left", yanchor="middle",
-                bgcolor="rgba(0,160,0,0.75)",
-                font=dict(color="white", size=11),
-                borderpad=3
-            )
-
-        used_y_positions_r = []
+            fig.add_annotation(x=label_x, y=adj, text=f"S{i+1}: ${s}", showarrow=False,
+                xanchor="left", yanchor="middle", bgcolor="rgba(0,160,0,0.75)",
+                font=dict(color="white", size=11), borderpad=3)
+        used_r = []
         for i, r in enumerate(chart_resistances):
-            adj_y = float(r)
-            for used_y in used_y_positions_r:
-                if abs(adj_y - used_y) / max(abs(used_y), 0.001) < 0.015:
-                    adj_y = adj_y * (1 + 0.015 * (i + 1))
-            used_y_positions_r.append(adj_y)
+            adj = float(r)
+            for uy in used_r:
+                if abs(adj-uy)/max(abs(uy),0.001) < 0.015: adj *= (1+0.015*(i+1))
+            used_r.append(adj)
             fig.add_hline(y=float(r), line_dash="dash", line_color="tomato", opacity=0.35, row=1, col=1)
-            fig.add_annotation(
-                x=label_x, y=adj_y,
-                text=f"R{i+1}: ${r}",
-                showarrow=False, xanchor="left", yanchor="middle",
-                bgcolor="rgba(200,50,50,0.75)",
-                font=dict(color="white", size=11),
-                borderpad=3
-            )
+            fig.add_annotation(x=label_x, y=adj, text=f"R{i+1}: ${r}", showarrow=False,
+                xanchor="left", yanchor="middle", bgcolor="rgba(200,50,50,0.75)",
+                font=dict(color="white", size=11), borderpad=3)
 
-    if show_target and fund and fund.get('target'):
-        fig.add_hline(y=fund['target'], line_dash="dot", line_color="gold", opacity=0.8, row=1, col=1)
-        fig.add_annotation(
-            x=label_x, y=fund['target'],
-            text=f"Target: ${fund['target']:.2f}",
-            showarrow=False, xanchor="left", yanchor="middle",
-            bgcolor="rgba(200,160,0,0.85)",
-            font=dict(color="white", size=11),
-            borderpad=3
-        )
+    if show_target and fund and fund.get("target"):
+        fig.add_hline(y=fund["target"], line_dash="dot", line_color="gold", opacity=0.8, row=1, col=1)
+        fig.add_annotation(x=label_x, y=fund["target"], text=f"Target: ${fund['target']:.2f}", showarrow=False,
+            xanchor="left", yanchor="middle", bgcolor="rgba(200,160,0,0.85)",
+            font=dict(color="white", size=11), borderpad=3)
 
     fig.update_layout(
         template="plotly_dark",
         title=dict(text=f"{selected} — {timeframe}", font=dict(size=16, color="white")),
-        xaxis_rangeslider_visible=False,
-        height=580,
+        xaxis_rangeslider_visible=False, height=580,
         margin=dict(l=5, r=100, t=40, b=5),
         legend=dict(orientation="h", y=1.05, x=0, font=dict(color="white")),
-        dragmode="drawline",
-        newshape=dict(line_color="yellow"),
-        modebar_add=["drawline", "drawopenpath", "drawrect", "eraseshape"],
-        plot_bgcolor="#0e0e1a",
-        paper_bgcolor="#0e0e1a",
-        font=dict(color="white")
+        dragmode="drawline", newshape=dict(line_color="yellow"),
+        modebar_add=["drawline","drawopenpath","drawrect","eraseshape"],
+        plot_bgcolor="#0e0e1a", paper_bgcolor="#0e0e1a", font=dict(color="white")
     )
     fig.update_xaxes(showgrid=False, zeroline=False, color="white")
     fig.update_yaxes(showgrid=True, gridcolor="#1e1e2e", zeroline=False, color="white")
     st.plotly_chart(fig, use_container_width=True)
 
-    if st.button("↩️ Clear All Drawings"):
-        st.rerun()
+    if st.button("↩️ Clear All Drawings"): st.rerun()
 
     st.markdown("---")
-
-    # 7. Institutional Ownership
     st.markdown("### 🏦 Institutional Ownership")
-    own1, own2, own3, own4 = st.columns(4)
+    own1,own2,own3,own4 = st.columns(4)
     own1.metric("Institution Held", f"{fund.get('held_percent_institutions')*100:.1f}%" if fund and fund.get('held_percent_institutions') else "N/A")
-    own2.metric("Insider Held", f"{fund.get('held_percent_insiders')*100:.1f}%" if fund and fund.get('held_percent_insiders') else "N/A")
-    own3.metric("Shares Out", f"{fund.get('shares_outstanding'):,}" if fund and fund.get('shares_outstanding') else "N/A")
-    own4.metric("Float Shares", f"{fund.get('float_shares'):,}" if fund and fund.get('float_shares') else "N/A")
-
+    own2.metric("Insider Held",     f"{fund.get('held_percent_insiders')*100:.1f}%"     if fund and fund.get('held_percent_insiders')     else "N/A")
+    own3.metric("Shares Out",  f"{fund.get('shares_outstanding'):,}" if fund and fund.get('shares_outstanding') else "N/A")
+    own4.metric("Float Shares", f"{fund.get('float_shares'):,}"      if fund and fund.get('float_shares')       else "N/A")
     inst_data = get_institutional_holders(selected)
     if inst_data is not None and not inst_data.empty:
         st.dataframe(inst_data, use_container_width=True)
@@ -953,43 +911,65 @@ with tab2:
 
 with tab3:
     selected_rev = st.selectbox("Select stock", df_results["Ticker"].tolist(), key="rev_select")
-    actuals, estimates = get_fmp_financials(selected_rev)
+    row_rev   = df_results[df_results["Ticker"] == selected_rev].iloc[0]
+    actuals   = row_rev["_actuals"]
+    estimates = row_rev["_estimates"]
 
+    st.markdown("### 📑 Fundamental Quality")
+    fqc1, fqc2 = st.columns(2)
+    with fqc1:
+        st.markdown("#### ✅ Strengths")
+        for sig in row_rev["_fundamental_signals"]:
+            st.markdown(f'<div style="background:#166534;color:#FFF;padding:8px 12px;border-radius:6px;margin-bottom:4px;">{sig}</div>', unsafe_allow_html=True)
+        if not row_rev["_fundamental_signals"]: st.info("No signals — add FMP_API_KEY")
+    with fqc2:
+        st.markdown("#### ⚠️ Warnings")
+        for warn in row_rev["_fundamental_warnings"]:
+            st.markdown(f'<div style="background:#991B1B;color:#FFF;padding:8px 12px;border-radius:6px;margin-bottom:4px;">{warn}</div>', unsafe_allow_html=True)
+        if not row_rev["_fundamental_warnings"]: st.success("No fundamental warnings")
+
+    st.markdown("---")
     if actuals and len(actuals) > 0:
-        rev_data = []
-        for item in reversed(actuals):
-            rev_data.append({
-                "Year": item.get("calendarYear", ""),
-                "Revenue ($M)": round(item.get("revenue", 0)/1e6, 1),
-                "EPS": round(item.get("eps", 0), 2),
-                "Net Income ($M)": round(item.get("netIncome", 0)/1e6, 1),
-                "Gross Profit ($M)": round(item.get("grossProfit", 0)/1e6, 1),
-                "Op Income ($M)": round(item.get("operatingIncome", 0)/1e6, 1),
-            })
+        rev_data = [{
+            "Year":              item.get("calendarYear",""),
+            "Revenue ($M)":      round(item.get("revenue",0)/1e6,1),
+            "Gross Profit ($M)": round(item.get("grossProfit",0)/1e6,1),
+            "Op Income ($M)":    round(item.get("operatingIncome",0)/1e6,1),
+            "Net Income ($M)":   round(item.get("netIncome",0)/1e6,1),
+            "EPS":               round(item.get("eps",0),2),
+            "Op Expenses ($M)":  round(item.get("operatingExpenses",0)/1e6,1),
+            "COGS ($M)":         round(item.get("costOfRevenue",0)/1e6,1),
+        } for item in reversed(actuals)]
         df_rev = pd.DataFrame(rev_data)
-        st.markdown("#### 📊 Actual Financials (Last 5 Years)")
+        st.markdown("#### 📊 Income Statement (Last 5 Years)")
         st.dataframe(df_rev, use_container_width=True)
         fig_rev = go.Figure()
-        fig_rev.add_trace(go.Bar(x=df_rev["Year"], y=df_rev["Revenue ($M)"], name="Revenue", marker_color="dodgerblue"))
+        fig_rev.add_trace(go.Bar(x=df_rev["Year"], y=df_rev["Revenue ($M)"],      name="Revenue",      marker_color="dodgerblue"))
+        fig_rev.add_trace(go.Bar(x=df_rev["Year"], y=df_rev["Gross Profit ($M)"], name="Gross Profit", marker_color="lime"))
         fig_rev.add_trace(go.Scatter(x=df_rev["Year"], y=df_rev["EPS"], name="EPS", yaxis="y2", line=dict(color="gold", width=2)))
-        fig_rev.update_layout(template="plotly_dark", title="Revenue & EPS",
-            yaxis=dict(title="Revenue ($M)", color="white"),
+        fig_rev.update_layout(
+            template="plotly_dark", title="Revenue, Gross Profit & EPS", barmode="group",
+            yaxis=dict(title="$ Million", color="white"),
             yaxis2=dict(title="EPS", overlaying="y", side="right", color="white"),
-            height=350, paper_bgcolor="#0e0e1a", plot_bgcolor="#0e0e1a", font=dict(color="white"))
+            height=400, paper_bgcolor="#0e0e1a", plot_bgcolor="#0e0e1a", font=dict(color="white"))
         st.plotly_chart(fig_rev, use_container_width=True)
     else:
         st.info("Add FMP_API_KEY to Streamlit secrets for full Revenue & EPS data.")
-        fund2 = get_fundamentals(selected_rev)
+        fund2 = row_rev["_fund"]
         if fund2:
-            col1, col2, col3, col4 = st.columns(4)
-            col1.metric("Rev Growth YoY", f"{round(fund2['rev_growth']*100,1)}%" if fund2.get('rev_growth') else "N/A")
-            col2.metric("Trailing EPS", f"${fund2.get('eps_trailing', 'N/A')}")
-            col3.metric("Forward EPS", f"${fund2.get('eps_forward', 'N/A')}")
-            col4.metric("Profit Margin", f"{round(fund2['profit_margin']*100,1)}%" if fund2.get('profit_margin') else "N/A")
+            c1,c2,c3,c4 = st.columns(4)
+            c1.metric("Rev Growth YoY", f"{round(fund2['rev_growth']*100,1)}%" if fund2.get('rev_growth') else "N/A")
+            c2.metric("Trailing EPS",   f"${fund2.get('eps_trailing','N/A')}")
+            c3.metric("Forward EPS",    f"${fund2.get('eps_forward','N/A')}")
+            c4.metric("Profit Margin",  f"{round(fund2['profit_margin']*100,1)}%" if fund2.get('profit_margin') else "N/A")
 
     if estimates and len(estimates) > 0:
-        est_data = [{"Year": item.get("date","")[:4], "Est Rev ($M)": round(item.get("estimatedRevenueAvg",0)/1e6,1), "Est EPS": round(item.get("estimatedEpsAvg",0),2)} for item in estimates[:3]]
-        st.markdown("#### 🔮 Estimates (Next 3 Years)")
+        est_data = [{
+            "Year":         e.get("date","")[:4],
+            "Est Rev ($M)": round(e.get("estimatedRevenueAvg",0)/1e6,1),
+            "Est EPS":      round(e.get("estimatedEpsAvg",0),2)
+        } for e in estimates[:3]]
+        st.markdown("#### 🔮 Revenue & EPS Estimates (Next 3 Years)")
         st.dataframe(pd.DataFrame(est_data), use_container_width=True)
 
 with tab4:
@@ -1003,10 +983,10 @@ with tab4:
     for j in range(0, len(macro_items), 4):
         cols = st.columns(4)
         for k, (name, data) in enumerate(macro_items[j:j+4]):
-            val = data["value"]
-            chg = data["change"]
             label = name + " (proxy)" if "Treasury" in name else name
-            cols[k].metric(label, f"{val}%" if "Treasury" in name else str(val), delta=f"{chg:+.2f}")
+            cols[k].metric(label,
+                f"{data['value']}%" if "Treasury" in name else str(data['value']),
+                delta=f"{data['change']:+.2f}")
 
 with tab5:
     selected_news = st.selectbox("Select stock", df_results["Ticker"].tolist(), key="news_select")
