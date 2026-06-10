@@ -298,6 +298,11 @@ def _clean_df(df):
         df = df.copy()
         df.index = df.index.tz_localize(None)
     df = df.dropna(how="all")
+    # FIX: batched downloads share one combined date index across all tickers,
+    # so a ticker can end with NaN rows (no data yet for the newest dates).
+    # Drop rows with no Close so iloc[-1] is always a real price.
+    if "Close" in df.columns:
+        df = df.dropna(subset=["Close"])
     return df if not df.empty and len(df) >= 50 else None
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -820,6 +825,10 @@ with tab1:
         styled = df_results[display_cols].style.map(color_score, subset=["Score"])
     except AttributeError:
         styled = df_results[display_cols].style.applymap(color_score, subset=["Score"])
+    try:
+        styled = styled.format({"RSI": "{:.1f}", "Vol Ratio": "{:.2f}"})
+    except Exception:
+        pass
     show_df(styled, height=500)
 
     c1, c2, c3, c4, c5 = st.columns(5)
@@ -1203,7 +1212,6 @@ with tab5:
                     break
                 st.markdown(f"• [{entry.title}]({entry.link})")
                 shown += 1
-            
         except Exception:
             continue
     if shown == 0:
