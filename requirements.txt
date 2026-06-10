@@ -1,8 +1,8 @@
 streamlit
 yfinance
 pandas
+numpy
 plotly
 requests
-fear-and-greed
 feedparser
-numpy
+fear-and-greed
