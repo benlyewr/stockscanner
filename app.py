@@ -7,6 +7,7 @@ import requests
 import feedparser
 import numpy as np
 from datetime import datetime, timedelta
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 st.set_page_config(page_title="Stock Scanner V2", layout="wide", initial_sidebar_state="collapsed")
 
@@ -28,7 +29,12 @@ st.markdown("""
 
 st.markdown("## 📈 Stock Scanner V2")
 
-FMP_API_KEY = st.secrets.get("FMP_API_KEY", None)
+# FIX: st.secrets crashes the entire app if no secrets.toml file exists.
+# Wrapped so the app runs with or without secrets configured.
+try:
+    FMP_API_KEY = st.secrets.get("FMP_API_KEY", None)
+except Exception:
+    FMP_API_KEY = None
 
 tickers = [
     "MSFT", "AAPL", "NVDA", "AVGO", "WDC",
@@ -41,6 +47,41 @@ tickers = [
     "BA", "APLD", "MSTR", "MARA", "MELI",
     "RCL", "MRVL", "TSLA", "ARM", "ADBE"
 ]
+
+# ---------- helpers ----------
+
+# Compatibility: use_container_width is deprecated in new Streamlit and the
+# replacement width="stretch" doesn't exist in old Streamlit. Support both.
+def show_df(data, **kw):
+    try:
+        st.dataframe(data, width="stretch", **kw)
+    except TypeError:
+        st.dataframe(data, use_container_width=True, **kw)
+
+def show_chart(fig, key=None):
+    try:
+        st.plotly_chart(fig, width="stretch", key=key)
+    except TypeError:
+        st.plotly_chart(fig, use_container_width=True, key=key)
+
+
+def safe_num(x, default=None):
+    """Return a clean float or default. Protects against None/NaN crashes."""
+    try:
+        v = float(x)
+        if np.isnan(v) or np.isinf(v):
+            return default
+        return v
+    except (TypeError, ValueError):
+        return default
+
+def fmt_int(x):
+    v = safe_num(x)
+    return f"{int(v):,}" if v is not None else "N/A"
+
+def fmt_price(x):
+    v = safe_num(x)
+    return f"${v:.2f}" if v is not None else "N/A"
 
 def get_label(score):
     if score >= 90: return "🟢 Elite"
@@ -152,7 +193,7 @@ def get_fundamental_score(actuals, estimates):
     fundamental_signals = []
     fundamental_warnings = []
 
-    if not actuals or len(actuals) < 2:
+    if not actuals or not isinstance(actuals, list) or len(actuals) < 2:
         return 0, [], ["⚠️ N/A — add FMP_API_KEY for full fundamental scoring"]
 
     try:
@@ -163,7 +204,6 @@ def get_fundamental_score(actuals, estimates):
         op_expenses       = [item.get("operatingExpenses", 0) for item in reversed(actuals)]
         cogs_list         = [item.get("costOfRevenue", 0)     for item in reversed(actuals)]
 
-        # Revenue trend — increasing is good
         if len(revenues) >= 3:
             if all(revenues[i] < revenues[i+1] for i in range(len(revenues)-1)):
                 fundamental_score += 20
@@ -171,7 +211,6 @@ def get_fundamental_score(actuals, estimates):
             else:
                 fundamental_warnings.append("⚠️ Revenue not consistently increasing")
 
-        # Gross profit trend — increasing is good
         if len(gross_profits) >= 3:
             if all(gross_profits[i] < gross_profits[i+1] for i in range(len(gross_profits)-1)):
                 fundamental_score += 15
@@ -179,7 +218,6 @@ def get_fundamental_score(actuals, estimates):
             else:
                 fundamental_warnings.append("⚠️ Gross profit not consistently increasing")
 
-        # COGS vs gross profit
         if len(cogs_list) >= 2 and len(gross_profits) >= 2:
             if cogs_list[-1] > cogs_list[-2] and gross_profits[-1] > gross_profits[-2]:
                 fundamental_score += 5
@@ -187,7 +225,6 @@ def get_fundamental_score(actuals, estimates):
             elif cogs_list[-1] > cogs_list[-2] and gross_profits[-1] <= gross_profits[-2]:
                 fundamental_warnings.append("⚠️ COGS rising while gross profit is weakening")
 
-        # Operating expenses vs revenue — declining or growing slower than revenue is good
         if len(op_expenses) >= 2 and len(revenues) >= 2:
             opex_growth = (op_expenses[-1] - op_expenses[-2]) / max(abs(op_expenses[-2]), 1)
             rev_growth_rate = (revenues[-1] - revenues[-2]) / max(abs(revenues[-2]), 1)
@@ -200,7 +237,6 @@ def get_fundamental_score(actuals, estimates):
             else:
                 fundamental_warnings.append("⚠️ Operating expenses growing faster than revenue")
 
-        # Operating income trend — increasing is good
         if len(operating_incomes) >= 2:
             if operating_incomes[-1] > operating_incomes[-2]:
                 fundamental_score += 15
@@ -208,7 +244,6 @@ def get_fundamental_score(actuals, estimates):
             else:
                 fundamental_warnings.append("⚠️ Operating income declining")
 
-        # Pre-tax income trend — increasing is good
         if len(pretax_incomes) >= 2:
             if pretax_incomes[-1] > pretax_incomes[-2]:
                 fundamental_score += 10
@@ -216,7 +251,6 @@ def get_fundamental_score(actuals, estimates):
             else:
                 fundamental_warnings.append("⚠️ Pre-tax income declining")
 
-        # Actual revenue vs estimate — beating estimates is good
         if estimates and len(estimates) > 0:
             try:
                 est_rev = estimates[0].get("estimatedRevenueAvg", 0)
@@ -231,10 +265,9 @@ def get_fundamental_score(actuals, estimates):
                         fundamental_signals.append(f"✅ Actual revenue beat estimate by {beat_pct*100:.1f}%")
                     else:
                         fundamental_warnings.append(f"⚠️ Revenue missed estimate by {abs(beat_pct)*100:.1f}%")
-            except:
+            except Exception:
                 pass
 
-        # Future revenue estimates — rising across upcoming periods is good
         if estimates and len(estimates) >= 2:
             try:
                 fut_revs = [e.get("estimatedRevenueAvg", 0) for e in estimates]
@@ -243,7 +276,7 @@ def get_fundamental_score(actuals, estimates):
                     fundamental_signals.append("✅ Future revenue estimates are rising across upcoming periods")
                 else:
                     fundamental_warnings.append("⚠️ Future revenue estimates are not consistently rising across upcoming periods")
-            except:
+            except Exception:
                 pass
 
     except Exception as e:
@@ -251,37 +284,104 @@ def get_fundamental_score(actuals, estimates):
 
     return max(0, min(fundamental_score, 100)), fundamental_signals, fundamental_warnings
 
-@st.cache_data(ttl=3600)
-def get_stock_data(ticker):
-    try:
-        df = yf.download(ticker, period="5y", auto_adjust=True, progress=False, threads=False)
-        if df.empty or len(df) < 50:
-            df = yf.Ticker(ticker).history(period="5y")
-        return df if not df.empty and len(df) >= 50 else None
-    except:
-        return None
+# ---------- data loaders ----------
 
-@st.cache_data(ttl=3600)
+def _clean_df(df):
+    """Flatten MultiIndex columns, strip timezone, drop empty rows."""
+    if df is None or df.empty:
+        return None
+    if isinstance(df.columns, pd.MultiIndex):
+        # single-ticker frame like ('Close','AAPL') -> 'Close'
+        df = df.copy()
+        df.columns = df.columns.get_level_values(0)
+    if getattr(df.index, "tz", None) is not None:
+        df = df.copy()
+        df.index = df.index.tz_localize(None)
+    df = df.dropna(how="all")
+    return df if not df.empty and len(df) >= 50 else None
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_all_stock_data(tickers_tuple):
+    """FIX: one batched download for every ticker instead of 45 separate
+    downloads — much faster and far less likely to be rate-limited by Yahoo."""
+    out = {}
+    try:
+        data = yf.download(list(tickers_tuple), period="5y", auto_adjust=True,
+                           progress=False, group_by="ticker", threads=True)
+        if isinstance(data.columns, pd.MultiIndex):
+            for t in tickers_tuple:
+                try:
+                    if t in data.columns.get_level_values(0):
+                        df = _clean_df(data[t])
+                        if df is not None:
+                            out[t] = df
+                except Exception:
+                    pass
+        else:
+            # batch collapsed to a single frame (only one ticker succeeded)
+            df = _clean_df(data)
+            if df is not None and len(tickers_tuple) == 1:
+                out[tickers_tuple[0]] = df
+    except Exception:
+        pass
+    # fallback: retry missing tickers individually
+    for t in tickers_tuple:
+        if t in out:
+            continue
+        try:
+            df = _clean_df(yf.download(t, period="5y", auto_adjust=True,
+                                       progress=False, threads=False))
+            if df is None:
+                df = _clean_df(yf.Ticker(t).history(period="5y"))
+            if df is not None:
+                out[t] = df
+        except Exception:
+            pass
+    return out
+
+@st.cache_data(ttl=3600, show_spinner=False)
 def get_fear_greed():
+    """Returns (score, label, is_stock_index). Only the real stock-market
+    Fear & Greed index is allowed to affect scoring."""
     try:
         import fear_and_greed
         data = fear_and_greed.get()
-        return round(data.value), data.description
-    except:
-        try:
-            r = requests.get("https://api.alternative.me/fng/")
-            d = r.json()["data"][0]
-            return int(d["value"]), d["value_classification"]
-        except:
-            return None, None
+        return round(data.value), data.description, True
+    except Exception:
+        pass
+    try:
+        r = requests.get("https://production.dataviz.cnn.io/index/fearandgreed/graphdata",
+                         headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
+        d = r.json()["fear_and_greed"]
+        return round(d["score"]), d["rating"], True
+    except Exception:
+        pass
+    try:
+        # FIX: alternative.me is the CRYPTO Fear & Greed index — keep only as a
+        # clearly-labelled proxy and never let it change stock scores.
+        r = requests.get("https://api.alternative.me/fng/", timeout=10)
+        d = r.json()["data"][0]
+        return int(d["value"]), d["value_classification"] + " (crypto proxy)", False
+    except Exception:
+        return None, None, False
 
-@st.cache_data(ttl=3600)
+@st.cache_data(ttl=3600, show_spinner=False)
 def get_spy_return():
-    spy = yf.download("SPY", period="1y", auto_adjust=True, progress=False, threads=False)
-    close = spy["Close"].squeeze()
-    return float(close.iloc[-1]) / float(close.iloc[0]) - 1
+    """FIX: was uncached-error-fatal — a single failed SPY download killed the
+    whole app. Now returns None on failure and the app degrades gracefully."""
+    try:
+        spy = _clean_df(yf.download("SPY", period="1y", auto_adjust=True,
+                                    progress=False, threads=False))
+        if spy is None:
+            return None
+        close = spy["Close"].squeeze().dropna()
+        if len(close) < 2:
+            return None
+        return float(close.iloc[-1]) / float(close.iloc[0]) - 1
+    except Exception:
+        return None
 
-@st.cache_data(ttl=3600)
+@st.cache_data(ttl=3600, show_spinner=False)
 def get_macro():
     macro = {}
     symbols = {
@@ -291,52 +391,74 @@ def get_macro():
     for name, sym in symbols.items():
         try:
             df = yf.download(sym, period="5d", auto_adjust=True, progress=False, threads=False)
-            close = df["Close"].squeeze()
-            val = round(float(close.iloc[-1]), 2)
-            prev = round(float(close.iloc[-2]), 2)
-            macro[name] = {"value": val, "change": round(val - prev, 2)}
-        except:
+            close = df["Close"].squeeze().dropna()
+            if len(close) >= 2:
+                val = round(float(close.iloc[-1]), 2)
+                prev = round(float(close.iloc[-2]), 2)
+                macro[name] = {"value": val, "change": round(val - prev, 2)}
+            elif len(close) == 1:
+                macro[name] = {"value": round(float(close.iloc[-1]), 2), "change": 0}
+            else:
+                macro[name] = {"value": "N/A", "change": 0}
+        except Exception:
             macro[name] = {"value": "N/A", "change": 0}
     return macro
 
-@st.cache_data(ttl=3600)
-def get_fundamentals(ticker):
+def _fetch_fundamentals_one(ticker):
     try:
         stock = yf.Ticker(ticker)
-        info = stock.info
-        rec = stock.recommendations
+        info = stock.info or {}
         strong_buy = buy = hold = sell = strong_sell = 0
-        if rec is not None and not rec.empty:
-            latest = rec.iloc[-1]
-            strong_buy = int(latest.get("strongBuy", 0))
-            buy        = int(latest.get("buy", 0))
-            hold       = int(latest.get("hold", 0))
-            sell       = int(latest.get("sell", 0))
-            strong_sell= int(latest.get("strongSell", 0))
-        target  = info.get("targetMeanPrice")
-        current = info.get("currentPrice")
+        try:
+            rec = stock.recommendations
+            if rec is not None and not rec.empty:
+                latest = rec.iloc[0] if "period" in rec.columns and str(rec.iloc[0].get("period")) == "0m" else rec.iloc[-1]
+                strong_buy = int(latest.get("strongBuy", 0) or 0)
+                buy        = int(latest.get("buy", 0) or 0)
+                hold       = int(latest.get("hold", 0) or 0)
+                sell       = int(latest.get("sell", 0) or 0)
+                strong_sell= int(latest.get("strongSell", 0) or 0)
+        except Exception:
+            pass
+        target  = safe_num(info.get("targetMeanPrice"))
+        current = safe_num(info.get("currentPrice"))
         upside  = round((target - current) / current * 100, 1) if target and current else None
         return {
             "strong_buy": strong_buy, "buy": buy, "hold": hold,
             "sell": sell, "strong_sell": strong_sell,
             "target": target, "upside": upside,
-            "rev_growth":       info.get("revenueGrowth"),
-            "earnings_growth":  info.get("earningsGrowth"),
-            "pe":               info.get("trailingPE"),
-            "forward_pe":       info.get("forwardPE"),
-            "profit_margin":    info.get("profitMargins"),
-            "eps_forward":      info.get("forwardEps"),
-            "eps_trailing":     info.get("trailingEps"),
-            "market_cap":       info.get("marketCap"),
-            "shares_outstanding":         info.get("sharesOutstanding"),
-            "held_percent_institutions":  info.get("heldPercentInstitutions"),
-            "held_percent_insiders":      info.get("heldPercentInsiders"),
-            "float_shares":               info.get("floatShares"),
+            "rev_growth":       safe_num(info.get("revenueGrowth")),
+            "earnings_growth":  safe_num(info.get("earningsGrowth")),
+            "pe":               safe_num(info.get("trailingPE")),
+            "forward_pe":       safe_num(info.get("forwardPE")),
+            "profit_margin":    safe_num(info.get("profitMargins")),
+            "eps_forward":      safe_num(info.get("forwardEps")),
+            "eps_trailing":     safe_num(info.get("trailingEps")),
+            "market_cap":       safe_num(info.get("marketCap")),
+            "shares_outstanding":         safe_num(info.get("sharesOutstanding")),
+            "held_percent_institutions":  safe_num(info.get("heldPercentInstitutions")),
+            "held_percent_insiders":      safe_num(info.get("heldPercentInsiders")),
+            "float_shares":               safe_num(info.get("floatShares")),
         }
-    except:
+    except Exception:
         return {}
 
-@st.cache_data(ttl=3600)
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_all_fundamentals(tickers_tuple):
+    """FIX: fundamentals fetched in parallel (6 workers) instead of one slow
+    sequential call per ticker. Each failure returns {} instead of breaking."""
+    out = {}
+    with ThreadPoolExecutor(max_workers=6) as ex:
+        futures = {ex.submit(_fetch_fundamentals_one, t): t for t in tickers_tuple}
+        for fut in as_completed(futures):
+            t = futures[fut]
+            try:
+                out[t] = fut.result()
+            except Exception:
+                out[t] = {}
+    return out
+
+@st.cache_data(ttl=3600, show_spinner=False)
 def get_institutional_holders(ticker):
     try:
         stock = yf.Ticker(ticker)
@@ -350,30 +472,34 @@ def get_institutional_holders(ticker):
                     if cols: df = df[cols]
                     df["Type"] = label
                     holders_list.append(df)
-            except:
+            except Exception:
                 pass
         return pd.concat(holders_list, ignore_index=True).head(15) if holders_list else None
-    except:
+    except Exception:
         return None
 
-@st.cache_data(ttl=3600)
+@st.cache_data(ttl=3600, show_spinner=False)
 def get_fmp_financials(ticker):
     if not FMP_API_KEY:
         return None, None
     try:
-        r1 = requests.get(f"https://financialmodelingprep.com/api/v3/income-statement/{ticker}?limit=5&apikey={FMP_API_KEY}")
-        r2 = requests.get(f"https://financialmodelingprep.com/api/v3/analyst-estimates/{ticker}?limit=3&apikey={FMP_API_KEY}")
-        return r1.json(), r2.json()
-    except:
+        r1 = requests.get(f"https://financialmodelingprep.com/api/v3/income-statement/{ticker}?limit=5&apikey={FMP_API_KEY}", timeout=15)
+        r2 = requests.get(f"https://financialmodelingprep.com/api/v3/analyst-estimates/{ticker}?limit=3&apikey={FMP_API_KEY}", timeout=15)
+        a, e = r1.json(), r2.json()
+        # FMP returns an error dict (not a list) on bad key / limit exhausted
+        if not isinstance(a, list): a = None
+        if not isinstance(e, list): e = None
+        return a, e
+    except Exception:
         return None, None
 
-@st.cache_data(ttl=1800)
+@st.cache_data(ttl=1800, show_spinner=False)
 def get_stock_news(ticker):
     try:
         url = f"https://feeds.finance.yahoo.com/rss/2.0/headline?s={ticker}&region=US&lang=en-US"
         feed = feedparser.parse(url)
-        return [{"title": e.title, "link": e.link, "published": e.published} for e in feed.entries[:6]]
-    except:
+        return [{"title": e.title, "link": e.link, "published": getattr(e, "published", "")} for e in feed.entries[:6]]
+    except Exception:
         return []
 
 def detect_123_reversal(close):
@@ -387,7 +513,7 @@ def detect_123_reversal(close):
             if p3 > p1 and prices[-1] > max(prices[p1_idx:p3_idx]):
                 return True
         return False
-    except:
+    except Exception:
         return False
 
 def get_support_resistance(close):
@@ -402,20 +528,29 @@ def get_support_resistance(close):
         price_now = float(prices[-1])
         return (sorted([s for s in supports if s < price_now], reverse=True)[:3],
                 sorted([r for r in resistances if r > price_now])[:3])
-    except:
+    except Exception:
         return [], []
 
-fg_score, fg_label = get_fear_greed()
+# ---------- load everything ----------
+
+fg_score, fg_label, fg_is_stock = get_fear_greed()
 spy_return = get_spy_return()
+if spy_return is None:
+    st.warning("⚠️ Could not load SPY benchmark — Relative Strength scores are disabled this session.")
 
 results = []
 skipped = []
-stock_data = {}
 
-with st.spinner("Loading all stocks..."):
+with st.spinner("Downloading price history (batched)..."):
+    stock_data = get_all_stock_data(tuple(tickers))
+
+with st.spinner("Loading fundamentals..."):
+    all_fundamentals = get_all_fundamentals(tuple(t for t in tickers if t in stock_data))
+
+with st.spinner("Scoring stocks..."):
     progress = st.progress(0)
     for i, ticker in enumerate(tickers):
-        df = get_stock_data(ticker)
+        df = stock_data.get(ticker)
         if df is None:
             skipped.append(ticker)
             progress.progress((i+1)/len(tickers))
@@ -425,23 +560,42 @@ with st.spinner("Loading all stocks..."):
             vol      = df["Volume"].squeeze()
             close_1y = close.iloc[-252:] if len(close) >= 252 else close
             price    = round(float(close.iloc[-1]), 2)
-            ma50     = round(float(close_1y.rolling(50).mean().iloc[-1]), 2)
-            ma150    = round(float(close_1y.rolling(150).mean().iloc[-1]), 2)
-            ma200    = round(float(close_1y.rolling(200).mean().iloc[-1]), 2)
+
+            ma50_s  = close_1y.rolling(50).mean()
+            ma150_s = close_1y.rolling(150).mean()
+            ma200_s = close_1y.rolling(200).mean()
+            ma50   = safe_num(ma50_s.iloc[-1])
+            ma150  = safe_num(ma150_s.iloc[-1])
+            ma200  = safe_num(ma200_s.iloc[-1])
+
             high52   = round(float(close_1y.max()), 2)
             low52    = round(float(close_1y.min()), 2)
-            pct_from_50   = round((price - ma50)  / ma50  * 100, 1)
-            pct_from_200  = round((price - ma200) / ma200 * 100, 1)
+            pct_from_50   = round((price - ma50)  / ma50  * 100, 1) if ma50  else 0.0
+            pct_from_200  = round((price - ma200) / ma200 * 100, 1) if ma200 else 0.0
             pct_from_high = round((price - high52)/ high52* 100, 1)
-            ma50_slope    = float(close_1y.rolling(50).mean().iloc[-1])  - float(close_1y.rolling(50).mean().iloc[-6])
-            ma200_slope   = float(close_1y.rolling(200).mean().iloc[-1]) - float(close_1y.rolling(200).mean().iloc[-10])
+
+            # FIX: slope lookups guarded — short histories made iloc[-6]/[-10]
+            # land on NaN and corrupt comparisons
+            ma50_slope  = 0.0
+            ma200_slope = 0.0
+            if ma50 and len(ma50_s.dropna()) >= 6:
+                v = safe_num(ma50_s.iloc[-6])
+                if v is not None: ma50_slope = ma50 - v
+            if ma200 and len(ma200_s.dropna()) >= 10:
+                v = safe_num(ma200_s.iloc[-10])
+                if v is not None: ma200_slope = ma200 - v
+
             stock_return  = float(close_1y.iloc[-1]) / float(close_1y.iloc[0]) - 1
-            rs            = round((stock_return - spy_return) * 100, 1)
+            rs            = round((stock_return - spy_return) * 100, 1) if spy_return is not None else 0.0
             reversal_123  = detect_123_reversal(close_1y)
+
             rsi_series    = calculate_rsi(close_1y).dropna()
-            current_rsi   = round(float(rsi_series.iloc[-1]), 1) if not rsi_series.empty else 50
-            avg_vol_50    = float(vol.rolling(50).mean().iloc[-1])
-            volume_ratio  = round(float(vol.iloc[-1]) / avg_vol_50, 2) if avg_vol_50 > 0 else 0
+            current_rsi   = round(float(rsi_series.iloc[-1]), 1) if not rsi_series.empty else 50.0
+            if np.isnan(current_rsi): current_rsi = 50.0
+
+            avg_vol_50    = safe_num(vol.rolling(50).mean().iloc[-1], 0)
+            last_vol      = safe_num(vol.iloc[-1], 0)
+            volume_ratio  = round(last_vol / avg_vol_50, 2) if avg_vol_50 and avg_vol_50 > 0 else 0
 
             if current_rsi >= 80:    rsi_status = "‼️ Extremely Overbought"
             elif current_rsi >= 70:  rsi_status = "⚠️ Overbought"
@@ -463,7 +617,7 @@ with st.spinner("Loading all stocks..."):
             elif pct_from_high <= -40: high_status = "⚠️ Deeply Below 52W High"
             else:                      high_status = "Normal"
 
-            fund            = get_fundamentals(ticker)
+            fund            = all_fundamentals.get(ticker, {})
             rev_growth      = fund.get("rev_growth")
             earnings_growth = fund.get("earnings_growth")
             profit_margin   = fund.get("profit_margin")
@@ -475,7 +629,7 @@ with st.spinner("Loading all stocks..."):
             score = 0
             scoring_breakdown = []
 
-            if ma50 > ma150 > ma200 and price > ma50:
+            if ma50 and ma150 and ma200 and ma50 > ma150 > ma200 and price > ma50:
                 score += 15; scoring_breakdown.append(("Trend Template", 15, "50MA > 150MA > 200MA and price above 50MA"))
             else:
                 scoring_breakdown.append(("Trend Template", 0, "Trend template not fully confirmed"))
@@ -490,7 +644,9 @@ with st.spinner("Loading all stocks..."):
             else:
                 scoring_breakdown.append(("1-2-3 Reversal", 0, "1-2-3 reversal not confirmed"))
 
-            if rs > 20:
+            if spy_return is None:
+                scoring_breakdown.append(("Relative Strength", 0, "SPY benchmark unavailable"))
+            elif rs > 20:
                 score += 15; scoring_breakdown.append(("Relative Strength", 15, "Outperforming SPY by >20%"))
             elif rs > 10:
                 score += 10; scoring_breakdown.append(("Relative Strength", 10, "Outperforming SPY by >10%"))
@@ -550,7 +706,8 @@ with st.spinner("Loading all stocks..."):
             else:
                 scoring_breakdown.append(("Volume", 0, "Normal volume"))
 
-            if fg_score and fg_score >= 75:
+            # FIX: crypto F&G proxy no longer silently penalises stock scores
+            if fg_score and fg_is_stock and fg_score >= 75:
                 score -= 5; scoring_breakdown.append(("Market Sentiment", -5, "Fear & Greed is high"))
             else:
                 scoring_breakdown.append(("Market Sentiment", 0, "No sentiment penalty"))
@@ -573,10 +730,10 @@ with st.spinner("Loading all stocks..."):
                 "RSI": current_rsi, "RSI Status": rsi_status,
                 "Vol Ratio": volume_ratio, "Vol Status": volume_status,
                 "Extension": extension_status, "52W Status": high_status,
-                "50MA": f"${ma50:.2f}", "200MA": f"${ma200:.2f}",
+                "50MA": fmt_price(ma50), "200MA": fmt_price(ma200),
                 "52W High": f"${high52:.2f}", "52W Low": f"${low52:.2f}",
                 "vs 50MA": f"{pct_from_50}%", "vs 200MA": f"{pct_from_200}%",
-                "vs 52W High": f"{pct_from_high}%", "RS vs SPY": f"{rs}%",
+                "vs 52W High": f"{pct_from_high}%", "RS vs SPY": f"{rs}%" if spy_return is not None else "N/A",
                 "1-2-3 Reversal": "✅" if reversal_123 else "❌",
                 "Buy Setup": buy_score,  "Buy Label": get_buy_label(buy_score),
                 "Risk Score": risk_score,"Risk Label": get_risk_label(risk_score),
@@ -589,14 +746,13 @@ with st.spinner("Loading all stocks..."):
                 "_fundamental_warnings": fundamental_warnings,
                 "_actuals": actuals, "_estimates": estimates,
             })
-            stock_data[ticker] = df
-        except:
+        except Exception:
             skipped.append(ticker)
         progress.progress((i+1)/len(tickers))
     progress.empty()
 
 if not results:
-    st.error("No stocks loaded. Please refresh or check Yahoo Finance data.")
+    st.error("No stocks loaded. Yahoo Finance may be rate-limiting — wait a minute and refresh.")
     st.stop()
 
 df_results = pd.DataFrame(results).sort_values("Score", ascending=False)
@@ -619,7 +775,7 @@ with tab0:
         (df_results["_rsi_raw"] >= 50) &
         (df_results["_rsi_raw"] <= 70) &
         (df_results["_rs_raw"] > 10) &
-        (df_results["_rev_growth_raw"].apply(lambda x: x > 0.10 if x else False))
+        (df_results["_rev_growth_raw"].apply(lambda x: bool(x) and not pd.isna(x) and x > 0.10))
     ].sort_values("Net Score", ascending=False)
 
     if quick.empty:
@@ -659,7 +815,12 @@ with tab1:
         "RSI","RSI Status","50MA","200MA","vs 50MA","vs 200MA","vs 52W High",
         "RS vs SPY","1-2-3 Reversal","Vol Ratio","Vol Status","Extension","52W Status"
     ]
-    st.dataframe(df_results[display_cols].style.map(color_score, subset=["Score"]), use_container_width=True, height=500)
+    # FIX: Styler API compatibility across pandas versions
+    try:
+        styled = df_results[display_cols].style.map(color_score, subset=["Score"])
+    except AttributeError:
+        styled = df_results[display_cols].style.applymap(color_score, subset=["Score"])
+    show_df(styled, height=500)
 
     c1, c2, c3, c4, c5 = st.columns(5)
     c1.metric("🟢 Elite",     len(df_results[df_results["Score"] >= 90]))
@@ -830,8 +991,8 @@ with tab2:
 
     vc1,vc2,vc3 = st.columns(3)
     vc1.metric("Volume Ratio",   row["Vol Ratio"])
-    vc2.metric("Latest Volume",  f"{int(vol_sel.iloc[-1]):,}")
-    vc3.metric("50D Avg Volume", f"{int(vol_sel.rolling(50).mean().iloc[-1]):,}")
+    vc2.metric("Latest Volume",  fmt_int(vol_sel.iloc[-1]))
+    vc3.metric("50D Avg Volume", fmt_int(vol_sel.rolling(50).mean().iloc[-1]))
 
     st.markdown("---")
     st.markdown("### 📈 Interactive Chart")
@@ -841,8 +1002,16 @@ with tab2:
 
     try:
         timeframe = st.segmented_control("Timeframe", ["1M","3M","6M","YTD","1Y","5Y"], default="1Y")
-    except:
+        if timeframe is None: timeframe = "1Y"
+    except Exception:
         timeframe = st.radio("Timeframe", ["1M","3M","6M","YTD","1Y","5Y"], horizontal=True, index=4)
+
+    # FIX: yfinance sometimes returns a timezone-aware index; comparing it with a
+    # naive Timestamp.now() raises TypeError. Index is normalised in _clean_df,
+    # but strip again here defensively.
+    if getattr(df_sel.index, "tz", None) is not None:
+        df_sel = df_sel.copy()
+        df_sel.index = df_sel.index.tz_localize(None)
 
     now = pd.Timestamp.now()
     if timeframe == "1M":   df_plot = df_sel[df_sel.index >= now - pd.DateOffset(months=1)]
@@ -864,12 +1033,12 @@ with tab2:
     fig.add_trace(go.Scatter(x=df_plot.index, y=close_plot.rolling(50).mean(),  name="50MA",  line=dict(color="dodgerblue", width=1.5)), row=1, col=1)
     fig.add_trace(go.Scatter(x=df_plot.index, y=close_plot.rolling(200).mean(), name="200MA", line=dict(color="red",        width=1.5)), row=1, col=1)
 
-    if show_volume:
+    if show_volume and len(vol_plot) > 0:
         clrs = ["lime" if i==0 or float(vol_plot.iloc[i])>=float(vol_plot.iloc[i-1]) else "red" for i in range(len(vol_plot))]
         fig.add_trace(go.Bar(x=df_plot.index, y=vol_plot, name="Volume", marker_color=clrs, opacity=0.4), row=2, col=1)
 
-    label_x = df_plot.index[-1]
-    if show_sr:
+    label_x = df_plot.index[-1] if len(df_plot) > 0 else None
+    if show_sr and label_x is not None:
         used_s = []
         for i, s in enumerate(chart_supports):
             adj = float(s)
@@ -891,7 +1060,7 @@ with tab2:
                 xanchor="left", yanchor="middle", bgcolor="rgba(200,50,50,0.75)",
                 font=dict(color="white", size=11), borderpad=3)
 
-    if show_target and fund and fund.get("target"):
+    if show_target and fund and fund.get("target") and label_x is not None:
         fig.add_hline(y=fund["target"], line_dash="dot", line_color="gold", opacity=0.8, row=1, col=1)
         fig.add_annotation(x=label_x, y=fund["target"], text=f"Target: ${fund['target']:.2f}", showarrow=False,
             xanchor="left", yanchor="middle", bgcolor="rgba(200,160,0,0.85)",
@@ -909,7 +1078,7 @@ with tab2:
     )
     fig.update_xaxes(showgrid=False, zeroline=False, color="white")
     fig.update_yaxes(showgrid=True, gridcolor="#1e1e2e", zeroline=False, color="white")
-    st.plotly_chart(fig, use_container_width=True)
+    show_chart(fig)
 
     if st.button("↩️ Clear All Drawings"): st.rerun()
 
@@ -918,11 +1087,11 @@ with tab2:
     own1,own2,own3,own4 = st.columns(4)
     own1.metric("Institution Held", f"{fund.get('held_percent_institutions')*100:.1f}%" if fund and fund.get('held_percent_institutions') else "N/A")
     own2.metric("Insider Held",     f"{fund.get('held_percent_insiders')*100:.1f}%"     if fund and fund.get('held_percent_insiders')     else "N/A")
-    own3.metric("Shares Out",  f"{fund.get('shares_outstanding'):,}" if fund and fund.get('shares_outstanding') else "N/A")
-    own4.metric("Float Shares", f"{fund.get('float_shares'):,}"      if fund and fund.get('float_shares')       else "N/A")
+    own3.metric("Shares Out",  fmt_int(fund.get('shares_outstanding')) if fund else "N/A")
+    own4.metric("Float Shares", fmt_int(fund.get('float_shares'))      if fund else "N/A")
     inst_data = get_institutional_holders(selected)
     if inst_data is not None and not inst_data.empty:
-        st.dataframe(inst_data, use_container_width=True)
+        show_df(inst_data)
     else:
         st.info("No detailed holder data available from Yahoo Finance for this ticker.")
     st.caption("Data sourced from Yahoo Finance. May be delayed or unavailable for some tickers.")
@@ -960,7 +1129,7 @@ with tab3:
         } for item in reversed(actuals)]
         df_rev = pd.DataFrame(rev_data)
         st.markdown("#### 📊 Income Statement (Last 5 Years)")
-        st.dataframe(df_rev, use_container_width=True)
+        show_df(df_rev)
         fig_rev = go.Figure()
         fig_rev.add_trace(go.Bar(x=df_rev["Year"], y=df_rev["Revenue ($M)"],      name="Revenue",      marker_color="dodgerblue"))
         fig_rev.add_trace(go.Bar(x=df_rev["Year"], y=df_rev["Gross Profit ($M)"], name="Gross Profit", marker_color="lime"))
@@ -970,7 +1139,7 @@ with tab3:
             yaxis=dict(title="$ Million", color="white"),
             yaxis2=dict(title="EPS", overlaying="y", side="right", color="white"),
             height=400, paper_bgcolor="#0e0e1a", plot_bgcolor="#0e0e1a", font=dict(color="white"))
-        st.plotly_chart(fig_rev, use_container_width=True)
+        show_chart(fig_rev)
     else:
         st.info("Add FMP_API_KEY to Streamlit secrets for full Revenue & EPS data.")
         fund2 = row_rev["_fund"]
@@ -988,14 +1157,15 @@ with tab3:
             "Est EPS":      round(e.get("estimatedEpsAvg",0),2)
         } for e in estimates[:3]]
         st.markdown("#### 🔮 Revenue & EPS Estimates (Next 3 Years)")
-        st.dataframe(pd.DataFrame(est_data), use_container_width=True)
+        show_df(pd.DataFrame(est_data))
 
 with tab4:
     macro = get_macro()
     st.markdown("### 🌍 Macro Dashboard")
     if fg_score:
         fg_color = "🟢" if fg_score >= 60 else "🟡" if fg_score >= 40 else "🔴"
-        st.metric(f"{fg_color} Fear & Greed", f"{fg_score} — {fg_label}")
+        suffix = "" if fg_is_stock else " — crypto proxy, stock index unavailable"
+        st.metric(f"{fg_color} Fear & Greed", f"{fg_score} — {fg_label}{suffix}")
     st.markdown("---")
     macro_items = list(macro.items())
     for j in range(0, len(macro_items), 4):
@@ -1003,7 +1173,7 @@ with tab4:
         for k, (name, data) in enumerate(macro_items[j:j+4]):
             label = name + " (proxy)" if "Treasury" in name else name
             cols[k].metric(label,
-                f"{data['value']}%" if "Treasury" in name else str(data['value']),
+                f"{data['value']}%" if "Treasury" in name and data['value'] != "N/A" else str(data['value']),
                 delta=f"{data['change']:+.2f}")
 
 with tab5:
@@ -1016,9 +1186,25 @@ with tab5:
         st.info("No news found.")
     st.divider()
     st.markdown("#### 🌐 Global Macro News")
-    try:
-        feed = feedparser.parse("https://feeds.reuters.com/reuters/businessNews")
-        for entry in feed.entries[:5]:
-            st.markdown(f"• [{entry.title}]({entry.link})")
-    except:
-        pass
+    # FIX: the Reuters RSS feed was shut down years ago and always returned
+    # nothing. Replaced with CNBC Top News, with Yahoo Finance as backup.
+    macro_feeds = [
+        "https://www.cnbc.com/id/100003114/device/rss/rss.html",
+        "https://finance.yahoo.com/news/rssindex",
+    ]
+    shown = 0
+    for feed_url in macro_feeds:
+        if shown >= 5:
+            break
+        try:
+            feed = feedparser.parse(feed_url)
+            for entry in feed.entries:
+                if shown >= 5:
+                    break
+                st.markdown(f"• [{entry.title}]({entry.link})")
+                shown += 1
+            
+        except Exception:
+            continue
+    if shown == 0:
+        st.info("No macro news available right now.")
