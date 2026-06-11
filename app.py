@@ -44,8 +44,9 @@ tickers = [
     "SMTC", "DY", "IONQ", "UNH", "SMCI",
     "NBIS", "MU", "DRAM", "VST", "HWM",
     "RDDT", "TSM", "ADI", "SNDK", "STRL",
-    "BA", "APLD", "MSTR", "MARA", "MELI",
-    "RCL", "MRVL", "TSLA", "ARM", "ADBE"
+    "BA", "APLD", "MSTR", "MARA", "MELI", 
+    "RCL", "MRVL", "TSLA", "ARM", "ADBE",
+    "MPWR", "SITM"
 ]
 
 # ---------- helpers ----------
